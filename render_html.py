@@ -18,7 +18,6 @@ def _card(section: dict) -> str:
 
 def render(data: dict) -> str:
     cards = "\n".join(_card(s) for s in data["sections"])
-    extra = escape(data.get("extra") or "")
     updated = data["updated_utc"]
     try:
         dt = datetime.fromisoformat(updated)
@@ -74,7 +73,6 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
 </header>
 <section class="grid">
 {cards}
-<article class="card"><h2>Extra usage</h2><div class="extra">{extra}</div></article>
 </section>
 <footer>auto-updated every 10 min</footer>
 </div>
