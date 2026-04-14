@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+usage.txt
+usage_raw.txt
+usage_clean.txt
+usage_screen.txt
+out.txt
+run.log
