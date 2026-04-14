@@ -3,17 +3,17 @@ from html import escape
 from pathlib import Path
 
 
-def _bar(percent: int) -> str:
-    p = max(0, min(100, int(percent)))
-    return f'<div class="bar"><div class="fill" style="width:{p}%"></div><span class="pct">{p}%</span></div>'
-
-
 def _card(section: dict) -> str:
     title = escape(section["title"])
-    percent = section.get("percent") or 0
+    percent = max(0, min(100, int(section.get("percent") or 0)))
     reset = escape(section.get("reset") or "")
     reset_html = f'<div class="reset">{reset}</div>' if reset else ""
-    return f'<article class="card"><h2>{title}</h2>{_bar(percent)}{reset_html}</article>'
+    return (
+        f'<article class="card">'
+        f'<div class="row"><h2>{title}</h2><span class="pct">{percent}%</span></div>'
+        f'<div class="bar"><div class="fill" style="width:{percent}%"></div></div>'
+        f'{reset_html}</article>'
+    )
 
 
 def render(data: dict) -> str:
@@ -56,10 +56,11 @@ header p{{opacity:.7;font-size:14px;margin-top:6px}}
   border:1px solid rgba(255,255,255,.12);
   box-shadow:0 8px 32px rgba(0,0,0,.25);
 }}
-.card h2{{font-size:14px;font-weight:500;opacity:.85;letter-spacing:.02em;margin-bottom:14px;text-transform:uppercase}}
+.card h2{{font-size:13px;font-weight:500;opacity:.8;letter-spacing:.04em;text-transform:uppercase}}
+.row{{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}}
+.pct{{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}}
 .bar{{position:relative;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}}
 .fill{{height:100%;border-radius:999px;background:linear-gradient(90deg,#7aa2ff,#b388ff);transition:width .4s ease}}
-.pct{{position:absolute;right:0;top:-22px;font-size:13px;font-variant-numeric:tabular-nums;opacity:.9}}
 .reset{{margin-top:14px;font-size:12px;opacity:.6}}
 .extra{{margin-top:12px;font-size:13px;opacity:.75}}
 footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
