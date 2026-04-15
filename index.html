@@ -30,6 +30,13 @@ header p{opacity:.7;font-size:14px;margin-top:6px}
   box-shadow:0 8px 32px rgba(0,0,0,.25);
 }
 .card h2{font-size:13px;font-weight:500;opacity:.8;letter-spacing:.04em;text-transform:uppercase}
+.age{margin:0 auto 24px;max-width:720px;padding:18px 24px;border-radius:18px;text-align:center;
+  font-size:22px;font-weight:700;letter-spacing:.01em;
+  background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.18);
+  box-shadow:0 8px 32px rgba(0,0,0,.25)}
+.age.fresh{background:linear-gradient(90deg,rgba(90,200,120,.25),rgba(90,200,180,.25));border-color:rgba(120,220,160,.5)}
+.age.stale{background:linear-gradient(90deg,rgba(240,160,60,.3),rgba(240,90,90,.3));border-color:rgba(240,160,90,.6)}
+.age small{display:block;font-size:12px;font-weight:400;opacity:.75;margin-top:4px;text-transform:none;letter-spacing:0}
 .row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}
 .pct{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .bar{position:relative;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
@@ -41,16 +48,34 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
+<div id="age" class="age" data-updated="2026-04-15T06:07:53+00:00">
+  <span id="age-text">Datenalter wird berechnet…</span>
+  <small>Letzte Aktualisierung: 2026-04-15 08:07 Mitteleuropäische Sommerzeit</small>
+</div>
 <header>
   <h1>Claude Usage</h1>
-  <p>Letzte Aktualisierung: 2026-04-15 08:04 Mitteleuropäische Sommerzeit</p>
 </header>
 <section class="grid">
-<article class="card"><div class="row"><h2>Current session</h2><span class="pct">11%</span></div><div class="bar"><div class="fill" style="width:11%"></div></div><div class="reset">Resets 12pm (Europe/Berlin)</div></article>
+<article class="card"><div class="row"><h2>Current session</h2><span class="pct">13%</span></div><div class="bar"><div class="fill" style="width:13%"></div></div><div class="reset">Resets 12pm (Europe/Berlin)</div></article>
 <article class="card"><div class="row"><h2>Current week (all models)</h2><span class="pct">43%</span></div><div class="bar"><div class="fill" style="width:43%"></div></div><div class="reset">Resets Apr 17, 9am (Europe/Berlin)</div></article>
 <article class="card"><div class="row"><h2>Current week (Sonnet only)</h2><span class="pct">0%</span></div><div class="bar"><div class="fill" style="width:0%"></div></div></article>
 </section>
 <footer>auto-updated every 10 min</footer>
 </div>
+<script>
+(function(){
+  var el=document.getElementById('age'),txt=document.getElementById('age-text');
+  var ts=Date.parse(el.getAttribute('data-updated'));
+  function tick(){
+    var diff=Math.max(0,Date.now()-ts);
+    var m=Math.floor(diff/60000),h=Math.floor(m/60);m=m%60;
+    var s=h>0?('Daten sind '+h+' Std. '+m+' Min. alt'):('Daten sind '+m+' Min. alt');
+    txt.textContent=s;
+    el.classList.toggle('fresh',diff<15*60000);
+    el.classList.toggle('stale',diff>=30*60000);
+  }
+  tick();setInterval(tick,30000);
+})();
+</script>
 </body>
 </html>
