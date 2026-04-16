@@ -41,6 +41,16 @@ header p{opacity:.7;font-size:14px;margin-top:6px}
 .pct{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .bar{position:relative;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
 .fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#7aa2ff,#b388ff);transition:width .4s ease}
+.card.pct-low .pct{color:#4ade80}
+.card.pct-mlow .pct{color:#a3e635}
+.card.pct-med .pct{color:#facc15}
+.card.pct-high .pct{color:#fb923c}
+.card.pct-crit .pct{color:#f87171}
+.card.pct-low .fill{background:linear-gradient(90deg,#86efac,#22c55e)}
+.card.pct-mlow .fill{background:linear-gradient(90deg,#bef264,#84cc16)}
+.card.pct-med .fill{background:linear-gradient(90deg,#fde047,#eab308)}
+.card.pct-high .fill{background:linear-gradient(90deg,#fdba74,#f97316)}
+.card.pct-crit .fill{background:linear-gradient(90deg,#fca5a5,#ef4444)}
 .reset{margin-top:14px;font-size:13px;color:#eef1f7;opacity:.95;font-weight:500}
 .extra{margin-top:12px;font-size:13px;opacity:.75}
 footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
@@ -48,17 +58,18 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-16T06:37:46+00:00">
+<div id="age" class="age" data-updated="2026-04-16T13:16:59+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-16 08:37 Mitteleuropäische Sommerzeit</small>
+  <small>Letzte Aktualisierung: 2026-04-16 15:16 Mitteleuropäische Sommerzeit</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-
+<article class="card pct-low"><div class="row"><h2>Current session</h2><span class="pct">0%</span></div><div class="bar"><div class="fill" style="width:0%"></div></div><div class="reset">Resets 3:59pm (Europe/Berlin)</div></article>
+<article class="card pct-high"><div class="row"><h2>Current week (all models)</h2><span class="pct">76%</span></div><div class="bar"><div class="fill" style="width:76%"></div></div><div class="reset">Resets 9am (Europe/Berlin)</div></article>
 </section>
-<footer>auto-updated every 10 min</footer>
+<footer>auto-updated every 5 min</footer>
 </div>
 <script>
 (function(){
@@ -73,6 +84,22 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     el.classList.toggle('stale',diff>=30*60000);
   }
   tick();setInterval(tick,30000);
+  var CHECK_MS=60000;
+  function checkForUpdate(){
+    if(document.hidden) return;
+    fetch('index.html?t='+Date.now(),{cache:'no-store'})
+      .then(function(r){return r.ok?r.text():null;})
+      .then(function(text){
+        if(!text) return;
+        var m=text.match(/id="age"[^>]*data-updated="([^"]+)"/);
+        if(m && m[1]!==el.getAttribute('data-updated')) location.reload();
+      })
+      .catch(function(){});
+  }
+  setInterval(checkForUpdate,CHECK_MS);
+  document.addEventListener('visibilitychange',function(){
+    if(!document.hidden) checkForUpdate();
+  });
 })();
 </script>
 </body>
