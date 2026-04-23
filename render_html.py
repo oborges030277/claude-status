@@ -65,24 +65,33 @@ def _bucket(pct: int) -> str:
 
 
 def _card(section: dict) -> str:
-    title = escape(section["title"])
+    title = section["title"]
+    title_esc = escape(title)
     percent = max(0, min(100, int(section.get("percent") or 0)))
     reset_raw = section.get("reset") or ""
     reset = escape(_to_24h(reset_raw))
     reset_html = f'<div class="reset">{reset}</div>' if reset else ""
     countdown_html = ""
-    if section.get("title") == "Current session":
+    crit_cls = " countdown-crit" if percent >= 100 else ""
+    if title == "Current session":
         target = _next_reset_iso(reset_raw)
         if target:
-            cls = "countdown" + (" countdown-crit" if percent >= 100 else "")
             countdown_html = (
-                f'<div class="{cls}" data-target="{escape(target)}">'
+                f'<div class="countdown{crit_cls}" data-target="{escape(target)}">'
                 f'<span class="cd-label">Nächster Session-Reset in</span>'
                 f'<span class="cd-value">–</span></div>'
             )
+    elif title == "Current week (all models)":
+        # Weekly reset day is not in the /usage text (only a time-of-day).
+        # JS fills data-target from history: last detected week-% drop + 7 days.
+        countdown_html = (
+            f'<div class="countdown{crit_cls}" data-target="" data-countdown-weekly="1">'
+            f'<span class="cd-label">Nächster Wochen-Reset in</span>'
+            f'<span class="cd-value">–</span></div>'
+        )
     return (
         f'<article class="card pct-{_bucket(percent)}">'
-        f'<div class="row"><h2>{title}</h2><span class="pct">{percent}%</span></div>'
+        f'<div class="row"><h2>{title_esc}</h2><span class="pct">{percent}%</span></div>'
         f'<div class="bar"><div class="fill" style="width:{percent}%"></div></div>'
         f'{reset_html}{countdown_html}</article>'
     )
@@ -193,15 +202,18 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
 .heatmap .hd{{opacity:.55;text-align:center;line-height:16px}}
 .heatmap .rl{{opacity:.55;line-height:18px;text-align:right;padding-right:4px}}
 .heatmap .cell{{height:18px;border-radius:3px;background:rgba(255,255,255,.05)}}
-.hm-legend{{margin-top:12px;display:flex;align-items:center;gap:10px;font-size:11px;opacity:.8}}
-.hm-legend .bar{{flex:1;height:10px;border-radius:999px;
+.hm-legend{{margin-top:14px;font-size:11px;opacity:.9}}
+.hm-legend-title{{margin-bottom:6px;opacity:.7;text-align:center;font-size:11px}}
+.hm-legend-bar{{height:12px;border-radius:999px;
   background:linear-gradient(90deg,
     rgba(255,255,255,.06) 0%,
     hsla(130,70%,55%,.45) 12%,
     hsla(80,70%,55%,.65) 35%,
     hsla(45,70%,55%,.85) 60%,
     hsla(0,70%,55%,1) 100%)}}
-.hm-legend .lbl{{font-variant-numeric:tabular-nums;opacity:.75;min-width:28px;text-align:center}}
+.hm-legend-ticks{{display:flex;justify-content:space-between;margin-top:4px;
+  font-variant-numeric:tabular-nums;opacity:.75}}
+.hm-legend-ticks span{{display:block}}
 .uplot,.u-wrap,.u-over{{background:transparent!important}}
 .u-legend{{color:#eef1f7!important;font-size:12px}}
 .u-legend .u-label,.u-legend .u-value{{color:#eef1f7!important}}
@@ -249,14 +261,11 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     <h2>Aktivität – Tag × Stunde</h2>
     <div id="heatmap" class="heatmap"></div>
     <div class="hm-legend" id="hm-legend" style="display:none">
-      <span class="lbl">0%</span>
-      <span class="lbl" style="text-align:center;flex:0 0 auto;padding:0 4px;opacity:.55">Ø Session-% in diesem Slot</span>
-      <span class="lbl">100%</span>
-    </div>
-    <div class="hm-legend" id="hm-legend-bar" style="display:none">
-      <span class="lbl" style="visibility:hidden">0%</span>
-      <span class="bar"></span>
-      <span class="lbl" style="visibility:hidden">100%</span>
+      <div class="hm-legend-title">Ø Session-% in diesem Slot (gemittelt über die letzten 30 Tage)</div>
+      <div class="hm-legend-bar"></div>
+      <div class="hm-legend-ticks">
+        <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+      </div>
     </div>
     <div class="empty" id="empty-heatmap" style="display:none">noch keine Daten</div>
   </div>
@@ -315,12 +324,20 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     ]);
   }}
   function detectWeekResets(rows){{
-    // A week reset = consecutive rows where week% drops steeply into single digits.
-    // Returns timestamps (unix seconds) where a new week started (use the "after" row).
+    // Week% is monotonically non-decreasing within a week and drops to ~0 at reset.
+    // So: any drop where the new value is in single digits signals a reset.
+    // Require the next sample (if any) to also be low, to guard against transient
+    // parse glitches that briefly read 0%.
     var out=[];
     for(var i=1;i<rows.length;i++){{
       var a=rows[i-1], b=rows[i];
-      if(a.week-b.week>=30 && b.week<=15){{ out.push(Date.parse(b.t)/1000); }}
+      if(a.week==null||b.week==null) continue;
+      if(a.week>b.week && b.week<=10){{
+        var next=rows[i+1];
+        if(!next || next.week==null || next.week<=b.week+10){{
+          out.push(Date.parse(b.t)/1000);
+        }}
+      }}
     }}
     return out;
   }}
@@ -417,10 +434,8 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     var host=document.getElementById('heatmap');
     if(!host) return;
     if(!rows.length){{ show('empty-heatmap'); return; }}
-    var leg1=document.getElementById('hm-legend');
-    var leg2=document.getElementById('hm-legend-bar');
-    if(leg1) leg1.style.display='flex';
-    if(leg2) leg2.style.display='flex';
+    var leg=document.getElementById('hm-legend');
+    if(leg) leg.style.display='block';
     var cutoff=(Date.now()/1000)-30*86400;
     var sums=new Array(7*24).fill(0);
     var counts=new Array(7*24).fill(0);
@@ -461,12 +476,32 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     document.getElementById('t-remaining').textContent=(summary.remaining_full_sessions==null?'–':summary.remaining_full_sessions.toFixed(1));
     document.getElementById('t-current').textContent=fmtPct(summary.current_norm_week);
   }}
+  function setWeeklyCountdownTarget(rows){{
+    var node=document.querySelector('.countdown[data-countdown-weekly="1"]');
+    if(!node) return;
+    var WEEK=7*86400;
+    var resets=detectWeekResets(rows);
+    var target=null;
+    if(resets.length){{
+      // Last detected reset = start of current week → next reset is +7 days.
+      target=resets[resets.length-1]+WEEK;
+    }} else if(rows.length){{
+      // No reset detected yet (e.g. daemon newer than 1 week):
+      // fall back to "earliest sample + 7 days" as a best-effort projection.
+      var firstT=Date.parse(rows[0].t)/1000;
+      if(!isNaN(firstT)) target=firstT+WEEK;
+    }}
+    if(target!=null){{
+      node.setAttribute('data-target', new Date(target*1000).toISOString());
+    }}
+  }}
   loadAll().then(function(res){{
     var rows=parseJsonl(res[0]);
     var payload=res[1]||{{}};
     if(payload && payload.summary) renderSummary(payload.summary);
     buildWeekly(rows);
     buildHeatmap(rows);
+    setWeeklyCountdownTarget(rows);
   }});
 }})();
 (function(){{
