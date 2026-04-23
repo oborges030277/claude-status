@@ -82,10 +82,12 @@ def _card(section: dict) -> str:
                 f'<span class="cd-value">–</span></div>'
             )
     elif title == "Current week (all models)":
-        # Weekly reset day is not in the /usage text (only a time-of-day).
-        # JS fills data-target from history: last detected week-% drop + 7 days.
+        # /usage only carries the reset time-of-day, so _next_reset_iso yields the next
+        # occurrence of that time (today/tomorrow) — a best-effort upper bound.
+        # JS refines this using detected week-% drops + 7 days when history allows.
+        target = _next_reset_iso(reset_raw)
         countdown_html = (
-            f'<div class="countdown{crit_cls}" data-target="" data-countdown-weekly="1">'
+            f'<div class="countdown{crit_cls}" data-target="{escape(target)}" data-countdown-weekly="1">'
             f'<span class="cd-label">Nächster Wochen-Reset in</span>'
             f'<span class="cd-value">–</span></div>'
         )
@@ -100,6 +102,8 @@ def _card(section: dict) -> str:
 def render(data: dict) -> str:
     sections = [s for s in data["sections"] if "sonnet" not in s.get("title", "").lower()]
     cards = "\n".join(_card(s) for s in sections)
+    week_section = next((s for s in sections if s.get("title") == "Current week (all models)"), None)
+    next_week_reset = _next_reset_iso(week_section.get("reset") or "") if week_section else ""
     updated = data["updated_utc"]
     try:
         dt = datetime.fromisoformat(updated)
@@ -250,8 +254,8 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     </div>
   </div>
   <div class="chart-card">
-    <h2>Wochenkontingent – Ist vs. Ideallinie (letzte 3 Wochen)</h2>
-    <div id="chart-weekly"></div>
+    <h2>Wochenkontingent – Ist vs. Ideallinie (letzte 3 Wochen + laufende Woche)</h2>
+    <div id="chart-weekly" data-next-week-reset="{escape(next_week_reset)}"></div>
     <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
     <div style="opacity:.55;font-size:11px;margin-top:10px;line-height:1.4">
       Die Ideallinie ist das lineare Soll: bei jedem Wochen-Reset bei 0%, am Ende der Woche bei 100%. Die Ist-Linie zeigt deinen tatsächlichen Wochenkontingent-Verbrauch über die Kalendertage.
@@ -344,62 +348,85 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
   function buildWeekly(rows){{
     var host=document.getElementById('chart-weekly');
     if(!host) return;
-    if(!rows.length || typeof uPlot==='undefined'){{ show('empty-weekly'); return; }}
-    var nowSec=Date.now()/1000;
-    var cutoff=nowSec-21*86400;
-    var inWin=rows.filter(function(r){{ var t=Date.parse(r.t)/1000; return !isNaN(t) && t>=cutoff; }});
-    if(!inWin.length){{ show('empty-weekly'); return; }}
-    // Build list of week-start timestamps inside window.
-    // Start with detected resets; if none, assume the earliest row is the start of the current week.
-    var resets=detectWeekResets(rows).filter(function(t){{return t>=cutoff;}});
-    var firstT=Date.parse(inWin[0].t)/1000;
-    var starts=resets.slice();
-    if(!starts.length || starts[0]>firstT+3600){{
-      // Prepend the window's first row as the implicit start of the earliest visible week.
-      starts.unshift(firstT);
-    }}
-    // Build ideal sawtooth: for each segment [starts[i], starts[i+1]] go from 0% to 100%.
-    // For the last (ongoing) segment, project 7 days forward.
+    if(typeof uPlot==='undefined'){{ show('empty-weekly'); return; }}
     var WEEK=7*86400;
+    var nowSec=Date.now()/1000;
+    var leftEdge=nowSec-21*86400;
+    // Determine the right edge = next weekly reset.
+    // Priority 1: last detected reset from history + 7 days.
+    // Priority 2: server-supplied data-next-week-reset (parsed from the /usage reset string).
+    // Priority 3: fallback — nowSec + 3.5d (centered guess).
+    var resets=detectWeekResets(rows);
+    var rightEdge=null;
+    if(resets.length){{
+      rightEdge=resets[resets.length-1]+WEEK;
+    }} else {{
+      var attr=host.getAttribute('data-next-week-reset')||'';
+      var t=attr?Date.parse(attr)/1000:NaN;
+      if(!isNaN(t)) rightEdge=t;
+    }}
+    if(rightEdge==null) rightEdge=nowSec+3.5*86400;
+    // Build week-start boundaries covering [leftEdge, rightEdge].
+    // Start from the ongoing week's start (rightEdge - 7d) and step back.
+    var starts=[];
+    var s=rightEdge-WEEK;
+    while(s>leftEdge-WEEK+1){{
+      starts.unshift(s);
+      s-=WEEK;
+    }}
+    // If we have detected resets, prefer them (more accurate than pure projection):
+    // replace each projected start within ±12h of a detected reset with the detected value.
+    if(resets.length){{
+      var tol=12*3600;
+      starts=starts.map(function(ps){{
+        for(var i=0;i<resets.length;i++){{
+          if(Math.abs(resets[i]-ps)<=tol) return resets[i];
+        }}
+        return ps;
+      }});
+    }}
+    // Ideal sawtooth: for each segment [starts[i], next_boundary], 0% → 100%.
+    // Insert NULL breaks so uPlot doesn't connect segments.
     var idealX=[], idealY=[];
     for(var i=0;i<starts.length;i++){{
-      var s=starts[i];
-      var e=(i+1<starts.length)?starts[i+1]:(s+WEEK);
-      idealX.push(s); idealY.push(0);
-      idealX.push(e); idealY.push(100);
-      // insert gap so uPlot doesn't connect back to 0 of next segment
-      if(i+1<starts.length){{
-        idealX.push(e+1); idealY.push(null);
-      }}
+      var a=starts[i];
+      var b=(i+1<starts.length)?starts[i+1]:rightEdge;
+      idealX.push(a); idealY.push(0);
+      idealX.push(b); idealY.push(100);
+      if(i+1<starts.length){{ idealX.push(b+1); idealY.push(null); }}
     }}
-    // Actual line: all rows in window
-    var actualX=inWin.map(function(r){{return Date.parse(r.t)/1000;}});
-    var actualY=inWin.map(function(r){{return r.week;}});
-    // Align to single x-axis: uPlot needs one shared x-array. Merge sorted unique.
+    // Actual line: all history rows within [leftEdge, nowSec]
+    var actualX=[], actualY=[];
+    rows.forEach(function(r){{
+      var t=Date.parse(r.t)/1000;
+      if(!isNaN(t) && t>=leftEdge && t<=nowSec && r.week!=null){{
+        actualX.push(t); actualY.push(r.week);
+      }}
+    }});
+    if(!actualX.length && !idealX.length){{ show('empty-weekly'); return; }}
+    // Merge to a single shared x-axis for uPlot.
     var xset={{}};
-    idealX.forEach(function(x){{if(x!=null) xset[x]=1;}});
-    actualX.forEach(function(x){{xset[x]=1;}});
+    idealX.forEach(function(x){{ if(x!=null) xset[x]=1; }});
+    actualX.forEach(function(x){{ xset[x]=1; }});
+    xset[Math.floor(leftEdge)]=1;
+    xset[Math.floor(rightEdge)]=1;
     var xs=Object.keys(xset).map(Number).sort(function(a,b){{return a-b;}});
-    // Build ideal and actual series aligned to xs (use null where no value)
     function interpIdeal(t){{
       for(var i=0;i<starts.length;i++){{
-        var s=starts[i];
-        var e=(i+1<starts.length)?starts[i+1]:(s+WEEK);
-        if(t>=s && t<=e){{
-          return (t-s)/(e-s)*100;
-        }}
+        var a=starts[i];
+        var b=(i+1<starts.length)?starts[i+1]:rightEdge;
+        if(t>=a && t<=b && b>a) return (t-a)/(b-a)*100;
       }}
       return null;
     }}
     var ideal=xs.map(interpIdeal);
-    // Actual: only at real sample points; null elsewhere to keep line only where we have data
     var actMap={{}};
     for(var j=0;j<actualX.length;j++){{ actMap[actualX[j]]=actualY[j]; }}
-    var actual=xs.map(function(x){{return (x in actMap)?actMap[x]:null;}});
+    var actual=xs.map(function(x){{ return (x in actMap)?actMap[x]:null; }});
     var w=host.clientWidth||680;
     var opts={{
       width:w, height:260,
-      scales:{{ x:{{time:true, range:[Math.max(cutoff,xs[0]), Math.max(nowSec, xs[xs.length-1])]}}, y:{{range:[0,105]}} }},
+      scales:{{ x:{{time:true, range:[leftEdge, rightEdge]}}, y:{{range:[0,105]}} }},
       series:[
         {{}},
         {{label:'Ideallinie (linear)', stroke:'rgba(248,113,113,.7)', width:1.5, dash:[4,4], points:{{show:false}}, spanGaps:false}},
@@ -411,9 +438,9 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
       ],
       hooks:{{
         draw:[function(u){{
-          if(!starts.length) return;
           var ctx=u.ctx;
           ctx.save();
+          // faint vertical lines at each week boundary
           ctx.strokeStyle='rgba(255,255,255,.18)';
           ctx.setLineDash([2,3]);
           starts.forEach(function(m){{
@@ -424,6 +451,17 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
             ctx.lineTo(x,u.bbox.top+u.bbox.height);
             ctx.stroke();
           }});
+          // highlight "now" with a bright vertical line
+          if(nowSec>=u.scales.x.min && nowSec<=u.scales.x.max){{
+            ctx.setLineDash([]);
+            ctx.strokeStyle='rgba(255,255,255,.35)';
+            ctx.lineWidth=1;
+            var xn=u.valToPos(nowSec,'x',true);
+            ctx.beginPath();
+            ctx.moveTo(xn,u.bbox.top);
+            ctx.lineTo(xn,u.bbox.top+u.bbox.height);
+            ctx.stroke();
+          }}
           ctx.restore();
         }}]
       }}
@@ -477,21 +515,15 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     document.getElementById('t-current').textContent=fmtPct(summary.current_norm_week);
   }}
   function setWeeklyCountdownTarget(rows){{
+    // Python pre-fills data-target with the next occurrence of the reset time-of-day.
+    // If history reveals actual week-reset moments, we override with (last_reset + 7 d)
+    // which is more accurate when the next reset is more than 24 h away.
     var node=document.querySelector('.countdown[data-countdown-weekly="1"]');
     if(!node) return;
     var WEEK=7*86400;
     var resets=detectWeekResets(rows);
-    var target=null;
     if(resets.length){{
-      // Last detected reset = start of current week → next reset is +7 days.
-      target=resets[resets.length-1]+WEEK;
-    }} else if(rows.length){{
-      // No reset detected yet (e.g. daemon newer than 1 week):
-      // fall back to "earliest sample + 7 days" as a best-effort projection.
-      var firstT=Date.parse(rows[0].t)/1000;
-      if(!isNaN(firstT)) target=firstT+WEEK;
-    }}
-    if(target!=null){{
+      var target=resets[resets.length-1]+WEEK;
       node.setAttribute('data-target', new Date(target*1000).toISOString());
     }}
   }}
