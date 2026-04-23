@@ -2,6 +2,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -29,6 +30,10 @@ _stop = threading.Event()
 
 
 def _handle_sigint(signum, frame):
+    # Second Ctrl+C forces exit — the winpty child and reader thread can otherwise
+    # stall a graceful shutdown indefinitely.
+    if _stop.is_set():
+        os._exit(130)
     _stop.set()
 
 
@@ -386,11 +391,14 @@ def get_usage_raw() -> str:
     t.start()
 
     try:
-        time.sleep(8.0)
+        if sleep_interruptible(8.0):
+            return ""
         proc.write("/usage")
-        time.sleep(1.5)
+        if sleep_interruptible(1.5):
+            return ""
         proc.write("\r")
-        time.sleep(10.0)
+        if sleep_interruptible(10.0):
+            return ""
     finally:
         try:
             proc.terminate(force=True)
@@ -406,14 +414,27 @@ def build_and_publish(data: dict) -> None:
     html_path = ROOT / "index.html"
     write_html(html_path, data)
     ts = data["updated_utc"]
-    os.system(
-        f'cd /d "{ROOT}" && git add index.html {HISTORY_FILE} {SESSIONS_FILE} '
-        f'&& git commit -m "update {ts}" -q && git push -q'
-    )
+    try:
+        subprocess.run(
+            ["git", "add", "index.html", HISTORY_FILE, SESSIONS_FILE],
+            cwd=ROOT, check=False, timeout=30,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"update {ts}", "-q"],
+            cwd=ROOT, check=False, timeout=30,
+        )
+        subprocess.run(
+            ["git", "push", "-q"],
+            cwd=ROOT, check=False, timeout=60,
+        )
+    except subprocess.TimeoutExpired as e:
+        print(f"[{datetime.now().isoformat(timespec='seconds')}] git timeout: {e!r}", file=sys.stderr)
 
 
 def run_once() -> None:
     raw = get_usage_raw()
+    if _stop.is_set():
+        return
     lines = render(raw)
     block = extract_usage_block(lines)
     (ROOT / "usage.txt").write_text("\n".join(block) + "\n", encoding="utf-8")
@@ -426,28 +447,34 @@ def run_once() -> None:
     build_and_publish(data)
 
 
-def sleep_interruptible(seconds: float) -> None:
+def sleep_interruptible(seconds: float) -> bool:
+    # Returns True if interrupted by _stop, False if slept the full duration.
     end = time.monotonic() + seconds
     while not _stop.is_set():
         remaining = end - time.monotonic()
         if remaining <= 0:
-            return
+            return False
         time.sleep(min(SLEEP_TICK, remaining))
+    return True
 
 
 def main() -> int:
     signal.signal(signal.SIGINT, _handle_sigint)
-    try:
-        signal.signal(signal.SIGTERM, _handle_sigint)
-    except (AttributeError, ValueError):
-        pass
+    for sig_name in ("SIGTERM", "SIGBREAK"):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, _handle_sigint)
+            except (ValueError, OSError):
+                pass
 
     print(f"[{datetime.now().isoformat(timespec='seconds')}] claude-status started, interval={INTERVAL_SECONDS}s")
     while not _stop.is_set():
         started = time.monotonic()
         try:
             run_once()
-            print(f"[{datetime.now().isoformat(timespec='seconds')}] updated ({time.monotonic()-started:.1f}s)")
+            status = "aborted" if _stop.is_set() else "updated"
+            print(f"[{datetime.now().isoformat(timespec='seconds')}] {status} ({time.monotonic()-started:.1f}s)")
         except Exception as e:
             print(f"[{datetime.now().isoformat(timespec='seconds')}] ERROR: {e!r}", file=sys.stderr)
         if _stop.is_set():
@@ -458,4 +485,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Force exit — winpty child handle + daemon reader thread would otherwise
+    # keep the interpreter alive after main() returns.
+    os._exit(main())
