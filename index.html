@@ -88,24 +88,27 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-23T06:17:03+00:00">
+<div id="age" class="age" data-updated="2026-04-23T06:20:18+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-23 08:17 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-23 08:20 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-<article class="card pct-high"><div class="row"><h2>Current session</h2><span class="pct">75%</span></div><div class="bar"><div class="fill" style="width:75%"></div></div><div class="reset">Resets 11:30 (Europe/Berlin)</div></article>
+<article class="card pct-high"><div class="row"><h2>Current session</h2><span class="pct">78%</span></div><div class="bar"><div class="fill" style="width:78%"></div></div><div class="reset">Resets 11:30 (Europe/Berlin)</div></article>
 <article class="card pct-high"><div class="row"><h2>Current week (all models)</h2><span class="pct">84%</span></div><div class="bar"><div class="fill" style="width:84%"></div></div><div class="reset">Resets 21:00 (Europe/Berlin)</div></article>
 </section>
 <section class="charts">
   <div class="chart-card">
     <h2>Summary</h2>
     <div class="tiles" id="tiles">
-      <div class="tile"><div class="val" id="t-avg">–</div><div class="lbl">Ø Δweek / Session</div></div>
-      <div class="tile"><div class="val" id="t-heavy">–</div><div class="lbl">Schwere Sessions / Woche</div></div>
-      <div class="tile"><div class="val" id="t-ratio">–</div><div class="lbl">Aktuelles Ratio</div></div>
+      <div class="tile"><div class="val" id="t-norm">–</div><div class="lbl">Ø Wochenkosten / voll genutzte Session</div></div>
+      <div class="tile"><div class="val" id="t-heavy">–</div><div class="lbl">Voll genutzte Sessions / Woche</div></div>
+      <div class="tile"><div class="val" id="t-current">–</div><div class="lbl">Aktuelle Session – hochgerechnet</div></div>
+    </div>
+    <div style="opacity:.55;font-size:11px;margin-top:10px;line-height:1.4">
+      Hochgerechnet = Δ Woche / genutzte Session-% × 100. Damit zählen auch Sessions, die du nicht voll ausschöpfst.
     </div>
   </div>
   <div class="chart-card">
@@ -114,9 +117,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     <div class="empty" id="empty-timeseries" style="display:none">noch keine Daten</div>
   </div>
   <div class="chart-card">
-    <h2>Δ Wochenverbrauch pro Session (letzte 30 Tage)</h2>
+    <h2>Hochgerechnete Wochenkosten pro Session (letzte 30 Tage)</h2>
     <div id="chart-sessions"></div>
-    <div class="empty" id="empty-sessions" style="display:none">noch keine abgeschlossenen Sessions</div>
+    <div class="empty" id="empty-sessions" style="display:none">noch keine ausgewerteten Sessions</div>
   </div>
   <div class="chart-card">
     <h2>Aktivität – Tag × Stunde</h2>
@@ -226,23 +229,24 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
   function buildSessionsBar(sessions){
     var host=document.getElementById('chart-sessions');
     if(!host) return;
-    var done=(sessions||[]).filter(function(s){return s.complete;});
-    if(!done.length || typeof uPlot==='undefined'){ show('empty-sessions'); return; }
-    var xs=done.map(function(s){return Date.parse(s.start_t)/1000;});
-    var ys=done.map(function(s){return s.delta_week;});
+    var usable=(sessions||[]).filter(function(s){return s.norm_delta_week!=null && s.delta_week>0;});
+    if(!usable.length || typeof uPlot==='undefined'){ show('empty-sessions'); return; }
+    var xs=usable.map(function(s){return Date.parse(s.start_t)/1000;});
+    var ys=usable.map(function(s){return s.norm_delta_week;});
+    var colors=usable.map(function(s){return s.complete?'rgba(179,136,255,.85)':'rgba(122,162,255,.85)';});
     var w=host.clientWidth||680;
     var barWidth=Math.max(3, Math.min(14, Math.floor(w/(xs.length*2))));
     function drawBars(u){
       var ctx=u.ctx;
       ctx.save();
-      ctx.fillStyle='rgba(179,136,255,.85)';
       for(var i=0;i<xs.length;i++){
         var x=u.valToPos(xs[i],'x',true);
         var y=u.valToPos(ys[i],'y',true);
         var y0=u.valToPos(0,'y',true);
+        ctx.fillStyle=colors[i];
         ctx.fillRect(x-barWidth/2,y,barWidth,Math.max(1,y0-y));
       }
-      // reference line at 14.3 (100/7)
+      // reference line at 14.3 (100/7 → gleichverteilte Woche)
       var yr=u.valToPos(100/7,'y',true);
       ctx.strokeStyle='rgba(248,113,113,.6)';
       ctx.setLineDash([4,3]);
@@ -252,12 +256,13 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
       ctx.stroke();
       ctx.restore();
     }
+    var maxY=Math.max.apply(null,ys);
     var opts={
       width:w, height:220,
-      scales:{ x:{time:true}, y:{range:[0, Math.max(20, Math.ceil(Math.max.apply(null,ys)/5)*5+5)]} },
+      scales:{ x:{time:true}, y:{range:[0, Math.max(20, Math.ceil(maxY/5)*5+5)]} },
       series:[
         {},
-        {label:'Δ Woche (%-Pkt)', stroke:'rgba(179,136,255,0)', points:{show:false}}
+        {label:'Hochgerechnet % / voll genutzte Session', stroke:'rgba(179,136,255,0)', points:{show:false}}
       ],
       axes:[
         {stroke:'#b8bdd0', grid:{stroke:'rgba(255,255,255,.06)'}},
@@ -306,9 +311,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
   }
   function renderSummary(summary){
     if(!summary) return;
-    document.getElementById('t-avg').textContent=fmtPct(summary.avg_delta_week);
+    document.getElementById('t-norm').textContent=fmtPct(summary.avg_norm_week);
     document.getElementById('t-heavy').textContent=(summary.heavy_per_week==null?'–':summary.heavy_per_week);
-    document.getElementById('t-ratio').textContent=fmtRatio(summary.current_ratio);
+    document.getElementById('t-current').textContent=fmtPct(summary.current_norm_week);
   }
   loadAll().then(function(res){
     var rows=parseJsonl(res[0]);
