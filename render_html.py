@@ -1,15 +1,53 @@
+import re
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
+
+try:
+    from zoneinfo import ZoneInfo
+    _BERLIN = ZoneInfo("Europe/Berlin")
+except Exception:
+    _BERLIN = None
+
+_TIME_AMPM_RE = re.compile(r"(\d{1,2})(?::(\d{2}))?\s*([ap])m\b", re.IGNORECASE)
+
+
+def _ampm_to_24h(match: re.Match) -> str:
+    hour = int(match.group(1))
+    minute = match.group(2)
+    is_pm = match.group(3).lower() == "p"
+    if is_pm:
+        if hour != 12:
+            hour += 12
+    else:
+        if hour == 12:
+            hour = 0
+    return f"{hour:02d}:{minute if minute else '00'}"
+
+
+def _to_24h(text: str) -> str:
+    return _TIME_AMPM_RE.sub(_ampm_to_24h, text)
+
+
+def _bucket(pct: int) -> str:
+    if pct <= 10:
+        return "low"
+    if pct <= 40:
+        return "mlow"
+    if pct <= 65:
+        return "med"
+    if pct <= 89:
+        return "high"
+    return "crit"
 
 
 def _card(section: dict) -> str:
     title = escape(section["title"])
     percent = max(0, min(100, int(section.get("percent") or 0)))
-    reset = escape(section.get("reset") or "")
+    reset = escape(_to_24h(section.get("reset") or ""))
     reset_html = f'<div class="reset">{reset}</div>' if reset else ""
     return (
-        f'<article class="card">'
+        f'<article class="card pct-{_bucket(percent)}">'
         f'<div class="row"><h2>{title}</h2><span class="pct">{percent}%</span></div>'
         f'<div class="bar"><div class="fill" style="width:{percent}%"></div></div>'
         f'{reset_html}</article>'
@@ -17,18 +55,25 @@ def _card(section: dict) -> str:
 
 
 def render(data: dict) -> str:
-    cards = "\n".join(_card(s) for s in data["sections"])
+    sections = [s for s in data["sections"] if "sonnet" not in s.get("title", "").lower()]
+    cards = "\n".join(_card(s) for s in sections)
     updated = data["updated_utc"]
     try:
         dt = datetime.fromisoformat(updated)
-        local = dt.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+        dt_local = dt.astimezone(_BERLIN) if _BERLIN is not None else dt.astimezone()
+        local = dt_local.strftime("%Y-%m-%d %H:%M %Z")
     except Exception:
         local = updated
+    hist_file = "history.jsonl"
+    sess_file = "sessions.json"
     return f"""<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Claude Usage</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -56,26 +101,304 @@ header p{{opacity:.7;font-size:14px;margin-top:6px}}
   box-shadow:0 8px 32px rgba(0,0,0,.25);
 }}
 .card h2{{font-size:13px;font-weight:500;opacity:.8;letter-spacing:.04em;text-transform:uppercase}}
+.age{{margin:0 auto 24px;max-width:720px;padding:18px 24px;border-radius:18px;text-align:center;
+  font-size:22px;font-weight:700;letter-spacing:.01em;
+  background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.18);
+  box-shadow:0 8px 32px rgba(0,0,0,.25)}}
+.age.fresh{{background:linear-gradient(90deg,rgba(90,200,120,.25),rgba(90,200,180,.25));border-color:rgba(120,220,160,.5)}}
+.age.stale{{background:linear-gradient(90deg,rgba(240,160,60,.3),rgba(240,90,90,.3));border-color:rgba(240,160,90,.6)}}
+.age small{{display:block;font-size:12px;font-weight:400;opacity:.75;margin-top:4px;text-transform:none;letter-spacing:0}}
 .row{{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px}}
 .pct{{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}}
 .bar{{position:relative;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}}
 .fill{{height:100%;border-radius:999px;background:linear-gradient(90deg,#7aa2ff,#b388ff);transition:width .4s ease}}
-.reset{{margin-top:14px;font-size:12px;opacity:.6}}
+.card.pct-low .pct{{color:#4ade80}}
+.card.pct-mlow .pct{{color:#a3e635}}
+.card.pct-med .pct{{color:#facc15}}
+.card.pct-high .pct{{color:#fb923c}}
+.card.pct-crit .pct{{color:#f87171}}
+.card.pct-low .fill{{background:linear-gradient(90deg,#86efac,#22c55e)}}
+.card.pct-mlow .fill{{background:linear-gradient(90deg,#bef264,#84cc16)}}
+.card.pct-med .fill{{background:linear-gradient(90deg,#fde047,#eab308)}}
+.card.pct-high .fill{{background:linear-gradient(90deg,#fdba74,#f97316)}}
+.card.pct-crit .fill{{background:linear-gradient(90deg,#fca5a5,#ef4444)}}
+.reset{{margin-top:14px;font-size:13px;color:#eef1f7;opacity:.95;font-weight:500}}
 .extra{{margin-top:12px;font-size:13px;opacity:.75}}
 footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
+.charts{{margin-top:32px;display:grid;gap:16px}}
+.chart-card{{
+  padding:22px 24px;border-radius:18px;
+  background:rgba(255,255,255,.07);
+  backdrop-filter:blur(18px) saturate(140%);
+  -webkit-backdrop-filter:blur(18px) saturate(140%);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 8px 32px rgba(0,0,0,.25);
+}}
+.chart-card h2{{font-size:13px;font-weight:500;opacity:.8;letter-spacing:.04em;text-transform:uppercase;margin-bottom:14px}}
+.chart-card .empty{{opacity:.55;font-size:13px;padding:24px 0;text-align:center}}
+.tiles{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}}
+.tile{{
+  padding:18px 14px;border-radius:14px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.10);
+  text-align:center;
+}}
+.tile .val{{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:#b388ff}}
+.tile .lbl{{font-size:11px;opacity:.7;margin-top:6px;text-transform:uppercase;letter-spacing:.04em}}
+.heatmap{{display:grid;grid-template-columns:28px repeat(24,1fr);gap:2px;font-size:10px}}
+.heatmap .hd{{opacity:.55;text-align:center;line-height:16px}}
+.heatmap .rl{{opacity:.55;line-height:18px;text-align:right;padding-right:4px}}
+.heatmap .cell{{height:18px;border-radius:3px;background:rgba(255,255,255,.05)}}
+.uplot,.u-wrap,.u-over{{background:transparent!important}}
+.u-legend{{color:#eef1f7!important;font-size:12px}}
+.u-legend .u-label,.u-legend .u-value{{color:#eef1f7!important}}
+.u-axis{{color:#b8bdd0}}
 </style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
 </head>
 <body>
 <div class="wrap">
+<div id="age" class="age" data-updated="{escape(updated)}">
+  <span id="age-text">Datenalter wird berechnet…</span>
+  <small>Letzte Aktualisierung: {escape(local)}</small>
+</div>
 <header>
   <h1>Claude Usage</h1>
-  <p>Letzte Aktualisierung: {escape(local)}</p>
 </header>
 <section class="grid">
 {cards}
 </section>
-<footer>auto-updated every 10 min</footer>
+<section class="charts">
+  <div class="chart-card">
+    <h2>Summary</h2>
+    <div class="tiles" id="tiles">
+      <div class="tile"><div class="val" id="t-norm">–</div><div class="lbl">Ø Wochenkosten / voll genutzte Session</div></div>
+      <div class="tile"><div class="val" id="t-heavy">–</div><div class="lbl">Voll genutzte Sessions / Woche</div></div>
+      <div class="tile"><div class="val" id="t-current">–</div><div class="lbl">Aktuelle Session – hochgerechnet</div></div>
+    </div>
+    <div style="opacity:.55;font-size:11px;margin-top:10px;line-height:1.4">
+      Hochgerechnet = Δ Woche / genutzte Session-% × 100. Damit zählen auch Sessions, die du nicht voll ausschöpfst.
+    </div>
+  </div>
+  <div class="chart-card">
+    <h2>Verlauf – letzte 7 Tage (Session% &amp; Woche%)</h2>
+    <div id="chart-timeseries"></div>
+    <div class="empty" id="empty-timeseries" style="display:none">noch keine Daten</div>
+  </div>
+  <div class="chart-card">
+    <h2>Hochgerechnete Wochenkosten pro Session (letzte 30 Tage)</h2>
+    <div id="chart-sessions"></div>
+    <div class="empty" id="empty-sessions" style="display:none">noch keine ausgewerteten Sessions</div>
+  </div>
+  <div class="chart-card">
+    <h2>Aktivität – Tag × Stunde</h2>
+    <div id="heatmap" class="heatmap"></div>
+    <div class="empty" id="empty-heatmap" style="display:none">noch keine Daten</div>
+  </div>
+</section>
+<footer>auto-updated every 5 min</footer>
 </div>
+<script>
+(function(){{
+  var el=document.getElementById('age'),txt=document.getElementById('age-text');
+  var ts=Date.parse(el.getAttribute('data-updated'));
+  function tick(){{
+    var diff=Math.max(0,Date.now()-ts);
+    var m=Math.floor(diff/60000),h=Math.floor(m/60);m=m%60;
+    var s=h>0?('Daten sind '+h+' Std. '+m+' Min. alt'):('Daten sind '+m+' Min. alt');
+    txt.textContent=s;
+    el.classList.toggle('fresh',diff<15*60000);
+    el.classList.toggle('stale',diff>=30*60000);
+  }}
+  tick();setInterval(tick,30000);
+  var CHECK_MS=60000;
+  function checkForUpdate(){{
+    if(document.hidden) return;
+    fetch('index.html?t='+Date.now(),{{cache:'no-store'}})
+      .then(function(r){{return r.ok?r.text():null;}})
+      .then(function(text){{
+        if(!text) return;
+        var m=text.match(/id="age"[^>]*data-updated="([^"]+)"/);
+        if(m && m[1]!==el.getAttribute('data-updated')){{
+          var u=new URL(location.href); u.searchParams.set('cb',Date.now()); location.replace(u.toString());
+        }}
+      }})
+      .catch(function(){{}});
+  }}
+  setInterval(checkForUpdate,CHECK_MS);
+  document.addEventListener('visibilitychange',function(){{
+    if(!document.hidden) checkForUpdate();
+  }});
+}})();
+(function(){{
+  function parseJsonl(text){{
+    var out=[];
+    (text||'').split(/\\r?\\n/).forEach(function(ln){{
+      if(!ln.trim()) return;
+      try{{ out.push(JSON.parse(ln)); }}catch(e){{}}
+    }});
+    return out;
+  }}
+  function fmtRatio(r){{ return (r==null)?'–':r.toFixed(2); }}
+  function fmtPct(n){{ return (n==null)?'–':(Math.round(n*10)/10)+'%'; }}
+  function show(id){{ var el=document.getElementById(id); if(el) el.style.display=''; }}
+  function hide(id){{ var el=document.getElementById(id); if(el) el.style.display='none'; }}
+  function loadAll(){{
+    return Promise.all([
+      fetch('{hist_file}?t='+Date.now(),{{cache:'no-store'}}).then(function(r){{return r.ok?r.text():'';}}).catch(function(){{return '';}}),
+      fetch('{sess_file}?t='+Date.now(),{{cache:'no-store'}}).then(function(r){{return r.ok?r.json():null;}}).catch(function(){{return null;}})
+    ]);
+  }}
+  function buildTimeseries(rows){{
+    var host=document.getElementById('chart-timeseries');
+    if(!host) return;
+    if(!rows.length || typeof uPlot==='undefined'){{ show('empty-timeseries'); return; }}
+    var cutoff=(Date.now()/1000)-7*86400;
+    var xs=[],sess=[],week=[];
+    var lastSid=null, markers=[];
+    rows.forEach(function(r){{
+      var t=Date.parse(r.t)/1000;
+      if(isNaN(t)||t<cutoff) return;
+      xs.push(t); sess.push(r.sess); week.push(r.week);
+      if(lastSid!=null && r.sid!==lastSid){{ markers.push(t); }}
+      lastSid=r.sid;
+    }});
+    if(!xs.length){{ show('empty-timeseries'); return; }}
+    var w=host.clientWidth||680;
+    var opts={{
+      width:w, height:260,
+      scales:{{ x:{{time:true}}, y:{{range:[0,100]}} }},
+      series:[
+        {{}},
+        {{label:'Session %', stroke:'#7aa2ff', width:2, points:{{show:false}}}},
+        {{label:'Woche %',   stroke:'#c86dd7', width:2, points:{{show:false}}}}
+      ],
+      axes:[
+        {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}}},
+        {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}, values:function(u,v){{return v.map(function(x){{return x+'%';}});}}}}
+      ],
+      hooks:{{
+        draw:[function(u){{
+          if(!markers.length) return;
+          var ctx=u.ctx;
+          ctx.save();
+          ctx.strokeStyle='rgba(255,255,255,.25)';
+          ctx.setLineDash([3,3]);
+          markers.forEach(function(m){{
+            var x=u.valToPos(m,'x',true);
+            ctx.beginPath();
+            ctx.moveTo(x,u.bbox.top);
+            ctx.lineTo(x,u.bbox.top+u.bbox.height);
+            ctx.stroke();
+          }});
+          ctx.restore();
+        }}]
+      }}
+    }};
+    new uPlot(opts,[xs,sess,week],host);
+  }}
+  function buildSessionsBar(sessions){{
+    var host=document.getElementById('chart-sessions');
+    if(!host) return;
+    var usable=(sessions||[]).filter(function(s){{return s.norm_delta_week!=null && s.delta_week>0;}});
+    if(!usable.length || typeof uPlot==='undefined'){{ show('empty-sessions'); return; }}
+    var xs=usable.map(function(s){{return Date.parse(s.start_t)/1000;}});
+    var ys=usable.map(function(s){{return s.norm_delta_week;}});
+    var colors=usable.map(function(s){{return s.complete?'rgba(179,136,255,.85)':'rgba(122,162,255,.85)';}});
+    var w=host.clientWidth||680;
+    var barWidth=Math.max(3, Math.min(14, Math.floor(w/(xs.length*2))));
+    function drawBars(u){{
+      var ctx=u.ctx;
+      ctx.save();
+      for(var i=0;i<xs.length;i++){{
+        var x=u.valToPos(xs[i],'x',true);
+        var y=u.valToPos(ys[i],'y',true);
+        var y0=u.valToPos(0,'y',true);
+        ctx.fillStyle=colors[i];
+        ctx.fillRect(x-barWidth/2,y,barWidth,Math.max(1,y0-y));
+      }}
+      // reference line at 14.3 (100/7 → gleichverteilte Woche)
+      var yr=u.valToPos(100/7,'y',true);
+      ctx.strokeStyle='rgba(248,113,113,.6)';
+      ctx.setLineDash([4,3]);
+      ctx.beginPath();
+      ctx.moveTo(u.bbox.left,yr);
+      ctx.lineTo(u.bbox.left+u.bbox.width,yr);
+      ctx.stroke();
+      ctx.restore();
+    }}
+    var maxY=Math.max.apply(null,ys);
+    var xMin=Math.min.apply(null,xs), xMax=Math.max.apply(null,xs);
+    if(xMin===xMax){{ xMin-=6*3600; xMax+=6*3600; }}
+    var opts={{
+      width:w, height:220,
+      scales:{{ x:{{time:true, range:[xMin,xMax]}}, y:{{range:[0, Math.max(20, Math.ceil(maxY/5)*5+5)]}} }},
+      series:[
+        {{}},
+        {{label:'Hochgerechnet % / voll genutzte Session', stroke:'rgba(179,136,255,0)', points:{{show:false}}}}
+      ],
+      axes:[
+        {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}}},
+        {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}, values:function(u,v){{return v.map(function(x){{return x+'%';}});}}}}
+      ],
+      hooks:{{ draw:[drawBars] }}
+    }};
+    new uPlot(opts,[xs,ys],host);
+  }}
+  function buildHeatmap(rows){{
+    var host=document.getElementById('heatmap');
+    if(!host) return;
+    if(!rows.length){{ show('empty-heatmap'); return; }}
+    var cutoff=(Date.now()/1000)-30*86400;
+    var sums=new Array(7*24).fill(0);
+    var counts=new Array(7*24).fill(0);
+    rows.forEach(function(r){{
+      var t=Date.parse(r.t)/1000;
+      if(isNaN(t)||t<cutoff) return;
+      var d=new Date(t*1000);
+      var dow=(d.getDay()+6)%7; // Mon=0
+      var hr=d.getHours();
+      var idx=dow*24+hr;
+      sums[idx]+=r.sess;
+      counts[idx]++;
+    }});
+    var means=sums.map(function(s,i){{return counts[i]?s/counts[i]:null;}});
+    var days=['Mo','Di','Mi','Do','Fr','Sa','So'];
+    var html='<div class="hd"></div>';
+    for(var h=0;h<24;h++) html+='<div class="hd">'+(h%3===0?h:'')+'</div>';
+    for(var d=0;d<7;d++){{
+      html+='<div class="rl">'+days[d]+'</div>';
+      for(var h2=0;h2<24;h2++){{
+        var v=means[d*24+h2];
+        var bg='rgba(255,255,255,.05)';
+        if(v!=null){{
+          var a=Math.max(0.08,Math.min(1,v/80));
+          // gradient low=green, high=red
+          var hue=Math.max(0, 130 - Math.round(v*1.3));
+          bg='hsla('+hue+',70%,55%,'+a.toFixed(2)+')';
+        }}
+        html+='<div class="cell" style="background:'+bg+'" title="'+days[d]+' '+h2+':00 → '+(v==null?'–':Math.round(v)+'%')+'"></div>';
+      }}
+    }}
+    host.innerHTML=html;
+  }}
+  function renderSummary(summary){{
+    if(!summary) return;
+    document.getElementById('t-norm').textContent=fmtPct(summary.avg_norm_week);
+    document.getElementById('t-heavy').textContent=(summary.heavy_per_week==null?'–':summary.heavy_per_week);
+    document.getElementById('t-current').textContent=fmtPct(summary.current_norm_week);
+  }}
+  loadAll().then(function(res){{
+    var rows=parseJsonl(res[0]);
+    var payload=res[1]||{{}};
+    if(payload && payload.summary) renderSummary(payload.summary);
+    buildTimeseries(rows);
+    buildSessionsBar(payload.sessions||[]);
+    buildHeatmap(rows);
+  }});
+}})();
+</script>
 </body>
 </html>
 """
