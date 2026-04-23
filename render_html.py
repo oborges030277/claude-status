@@ -136,7 +136,8 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
 }}
 .chart-card h2{{font-size:13px;font-weight:500;opacity:.8;letter-spacing:.04em;text-transform:uppercase;margin-bottom:14px}}
 .chart-card .empty{{opacity:.55;font-size:13px;padding:24px 0;text-align:center}}
-.tiles{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}}
+.tiles{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:8px}}
+@media (max-width:640px){{.tiles{{grid-template-columns:repeat(2,1fr)}}}}
 .tile{{
   padding:18px 14px;border-radius:14px;
   background:rgba(255,255,255,.06);
@@ -175,6 +176,7 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     <div class="tiles" id="tiles">
       <div class="tile"><div class="val" id="t-norm">–</div><div class="lbl">Ø Wochenkosten / voll genutzte Session</div></div>
       <div class="tile"><div class="val" id="t-heavy">–</div><div class="lbl">Voll genutzte Sessions / Woche</div></div>
+      <div class="tile"><div class="val" id="t-remaining">–</div><div class="lbl">Volle Sessions noch übrig (diese Woche)</div></div>
       <div class="tile"><div class="val" id="t-current">–</div><div class="lbl">Aktuelle Session – hochgerechnet</div></div>
     </div>
     <div style="opacity:.55;font-size:11px;margin-top:10px;line-height:1.4">
@@ -387,6 +389,7 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     if(!summary) return;
     document.getElementById('t-norm').textContent=fmtPct(summary.avg_norm_week);
     document.getElementById('t-heavy').textContent=(summary.heavy_per_week==null?'–':summary.heavy_per_week);
+    document.getElementById('t-remaining').textContent=(summary.remaining_full_sessions==null?'–':summary.remaining_full_sessions.toFixed(1));
     document.getElementById('t-current').textContent=fmtPct(summary.current_norm_week);
   }}
   loadAll().then(function(res){{

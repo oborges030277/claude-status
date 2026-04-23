@@ -297,15 +297,18 @@ def detect_sessions(rows: list[dict]) -> list[dict]:
 
 
 def compute_summary(sessions: list[dict]) -> dict:
+    empty = {
+        "avg_norm_week": None,
+        "avg_delta_week": None,
+        "heavy_per_week": None,
+        "current_ratio": None,
+        "current_norm_week": None,
+        "current_week_pct": None,
+        "remaining_full_sessions": None,
+        "sample_count": 0,
+    }
     if not sessions:
-        return {
-            "avg_norm_week": None,
-            "avg_delta_week": None,
-            "heavy_per_week": None,
-            "current_ratio": None,
-            "current_norm_week": None,
-            "sample_count": 0,
-        }
+        return empty
     cutoff = datetime.now(timezone.utc) - timedelta(days=14)
     # Include the current (incomplete) session too — its ratio is already
     # meaningful once peak_sess >= 10%. Only skip sessions with too little
@@ -327,12 +330,23 @@ def compute_summary(sessions: list[dict]) -> dict:
     current = next((s for s in sessions if not s.get("complete")), None)
     current_ratio = current.get("ratio") if current else None
     current_norm = current.get("norm_delta_week") if current else None
+    # Latest known week% — from the most recent session (complete or not).
+    latest = sessions[-1]
+    current_week = latest.get("week_end")
+    if current_week is None:
+        current_week = latest.get("week_start")
+    remaining_full = None
+    if current_week is not None and avg_norm and avg_norm > 0:
+        remaining_pct = max(0, 100 - current_week)
+        remaining_full = round(remaining_pct / avg_norm, 1)
     return {
         "avg_norm_week": round(avg_norm, 1) if avg_norm is not None else None,
         "avg_delta_week": round(avg_raw, 1) if avg_raw is not None else None,
         "heavy_per_week": heavy_per_week,
         "current_ratio": current_ratio,
         "current_norm_week": current_norm,
+        "current_week_pct": current_week,
+        "remaining_full_sessions": remaining_full,
         "sample_count": len(recent),
     }
 
