@@ -1,1 +1,1 @@
-{"sessions":[{"sid":1,"start_t":"2026-04-23T06:11:41+00:00","end_t":"2026-04-23T06:11:41+00:00","peak_sess":73,"week_start":83,"week_end":83,"delta_week":0,"ratio":0.0,"complete":false}],"summary":{"avg_delta_week":null,"heavy_per_week":null,"current_ratio":0.0}}
+{"sessions":[{"sid":1,"start_t":"2026-04-23T06:11:41+00:00","end_t":"2026-04-23T06:17:03+00:00","peak_sess":75,"week_start":83,"week_end":84,"delta_week":1,"ratio":0.013333333333333334,"complete":false}],"summary":{"avg_delta_week":null,"heavy_per_week":null,"current_ratio":0.013}}
