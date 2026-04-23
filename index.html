@@ -54,20 +54,75 @@ header p{opacity:.7;font-size:14px;margin-top:6px}
 .reset{margin-top:14px;font-size:13px;color:#eef1f7;opacity:.95;font-weight:500}
 .extra{margin-top:12px;font-size:13px;opacity:.75}
 footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
+.charts{margin-top:32px;display:grid;gap:16px}
+.chart-card{
+  padding:22px 24px;border-radius:18px;
+  background:rgba(255,255,255,.07);
+  backdrop-filter:blur(18px) saturate(140%);
+  -webkit-backdrop-filter:blur(18px) saturate(140%);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 8px 32px rgba(0,0,0,.25);
+}
+.chart-card h2{font-size:13px;font-weight:500;opacity:.8;letter-spacing:.04em;text-transform:uppercase;margin-bottom:14px}
+.chart-card .empty{opacity:.55;font-size:13px;padding:24px 0;text-align:center}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:8px}
+.tile{
+  padding:18px 14px;border-radius:14px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.10);
+  text-align:center;
+}
+.tile .val{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:#b388ff}
+.tile .lbl{font-size:11px;opacity:.7;margin-top:6px;text-transform:uppercase;letter-spacing:.04em}
+.heatmap{display:grid;grid-template-columns:28px repeat(24,1fr);gap:2px;font-size:10px}
+.heatmap .hd{opacity:.55;text-align:center;line-height:16px}
+.heatmap .rl{opacity:.55;line-height:18px;text-align:right;padding-right:4px}
+.heatmap .cell{height:18px;border-radius:3px;background:rgba(255,255,255,.05)}
+.uplot,.u-wrap,.u-over{background:transparent!important}
+.u-legend{color:#eef1f7!important;font-size:12px}
+.u-legend .u-label,.u-legend .u-value{color:#eef1f7!important}
+.u-axis{color:#b8bdd0}
 </style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-23T06:08:31+00:00">
+<div id="age" class="age" data-updated="2026-04-23T06:11:41+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-23 08:08 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-23 08:11 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-<article class="card pct-high"><div class="row"><h2>Current session</h2><span class="pct">72%</span></div><div class="bar"><div class="fill" style="width:72%"></div></div><div class="reset">Resets 11:29 (Europe/Berlin)</div></article>
+<article class="card pct-high"><div class="row"><h2>Current session</h2><span class="pct">73%</span></div><div class="bar"><div class="fill" style="width:73%"></div></div><div class="reset">Resets 11:30 (Europe/Berlin)</div></article>
 <article class="card pct-high"><div class="row"><h2>Current week (all models)</h2><span class="pct">83%</span></div><div class="bar"><div class="fill" style="width:83%"></div></div><div class="reset">Resets 21:00 (Europe/Berlin)</div></article>
+</section>
+<section class="charts">
+  <div class="chart-card">
+    <h2>Summary</h2>
+    <div class="tiles" id="tiles">
+      <div class="tile"><div class="val" id="t-avg">–</div><div class="lbl">Ø Δweek / Session</div></div>
+      <div class="tile"><div class="val" id="t-heavy">–</div><div class="lbl">Schwere Sessions / Woche</div></div>
+      <div class="tile"><div class="val" id="t-ratio">–</div><div class="lbl">Aktuelles Ratio</div></div>
+    </div>
+  </div>
+  <div class="chart-card">
+    <h2>Verlauf – letzte 7 Tage (Session% &amp; Woche%)</h2>
+    <div id="chart-timeseries"></div>
+    <div class="empty" id="empty-timeseries" style="display:none">noch keine Daten</div>
+  </div>
+  <div class="chart-card">
+    <h2>Δ Wochenverbrauch pro Session (letzte 30 Tage)</h2>
+    <div id="chart-sessions"></div>
+    <div class="empty" id="empty-sessions" style="display:none">noch keine abgeschlossenen Sessions</div>
+  </div>
+  <div class="chart-card">
+    <h2>Aktivität – Tag × Stunde</h2>
+    <div id="heatmap" class="heatmap"></div>
+    <div class="empty" id="empty-heatmap" style="display:none">noch keine Daten</div>
+  </div>
 </section>
 <footer>auto-updated every 5 min</footer>
 </div>
@@ -99,6 +154,169 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
   setInterval(checkForUpdate,CHECK_MS);
   document.addEventListener('visibilitychange',function(){
     if(!document.hidden) checkForUpdate();
+  });
+})();
+(function(){
+  function parseJsonl(text){
+    var out=[];
+    (text||'').split(/\r?\n/).forEach(function(ln){
+      if(!ln.trim()) return;
+      try{ out.push(JSON.parse(ln)); }catch(e){}
+    });
+    return out;
+  }
+  function fmtRatio(r){ return (r==null)?'–':r.toFixed(2); }
+  function fmtPct(n){ return (n==null)?'–':(Math.round(n*10)/10)+'%'; }
+  function show(id){ var el=document.getElementById(id); if(el) el.style.display=''; }
+  function hide(id){ var el=document.getElementById(id); if(el) el.style.display='none'; }
+  function loadAll(){
+    return Promise.all([
+      fetch('history.jsonl?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.text():'';}).catch(function(){return '';}),
+      fetch('sessions.json?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
+    ]);
+  }
+  function buildTimeseries(rows){
+    var host=document.getElementById('chart-timeseries');
+    if(!host) return;
+    if(!rows.length || typeof uPlot==='undefined'){ show('empty-timeseries'); return; }
+    var cutoff=(Date.now()/1000)-7*86400;
+    var xs=[],sess=[],week=[];
+    var lastSid=null, markers=[];
+    rows.forEach(function(r){
+      var t=Date.parse(r.t)/1000;
+      if(isNaN(t)||t<cutoff) return;
+      xs.push(t); sess.push(r.sess); week.push(r.week);
+      if(lastSid!=null && r.sid!==lastSid){ markers.push(t); }
+      lastSid=r.sid;
+    });
+    if(!xs.length){ show('empty-timeseries'); return; }
+    var w=host.clientWidth||680;
+    var opts={
+      width:w, height:260,
+      scales:{ x:{time:true}, y:{range:[0,100]} },
+      series:[
+        {},
+        {label:'Session %', stroke:'#7aa2ff', width:2, points:{show:false}},
+        {label:'Woche %',   stroke:'#c86dd7', width:2, points:{show:false}}
+      ],
+      axes:[
+        {stroke:'#b8bdd0', grid:{stroke:'rgba(255,255,255,.06)'}},
+        {stroke:'#b8bdd0', grid:{stroke:'rgba(255,255,255,.06)'}, values:function(u,v){return v.map(function(x){return x+'%';});}}
+      ],
+      hooks:{
+        draw:[function(u){
+          if(!markers.length) return;
+          var ctx=u.ctx;
+          ctx.save();
+          ctx.strokeStyle='rgba(255,255,255,.25)';
+          ctx.setLineDash([3,3]);
+          markers.forEach(function(m){
+            var x=u.valToPos(m,'x',true);
+            ctx.beginPath();
+            ctx.moveTo(x,u.bbox.top);
+            ctx.lineTo(x,u.bbox.top+u.bbox.height);
+            ctx.stroke();
+          });
+          ctx.restore();
+        }]
+      }
+    };
+    new uPlot(opts,[xs,sess,week],host);
+  }
+  function buildSessionsBar(sessions){
+    var host=document.getElementById('chart-sessions');
+    if(!host) return;
+    var done=(sessions||[]).filter(function(s){return s.complete;});
+    if(!done.length || typeof uPlot==='undefined'){ show('empty-sessions'); return; }
+    var xs=done.map(function(s){return Date.parse(s.start_t)/1000;});
+    var ys=done.map(function(s){return s.delta_week;});
+    var w=host.clientWidth||680;
+    var barWidth=Math.max(3, Math.min(14, Math.floor(w/(xs.length*2))));
+    function drawBars(u){
+      var ctx=u.ctx;
+      ctx.save();
+      ctx.fillStyle='rgba(179,136,255,.85)';
+      for(var i=0;i<xs.length;i++){
+        var x=u.valToPos(xs[i],'x',true);
+        var y=u.valToPos(ys[i],'y',true);
+        var y0=u.valToPos(0,'y',true);
+        ctx.fillRect(x-barWidth/2,y,barWidth,Math.max(1,y0-y));
+      }
+      // reference line at 14.3 (100/7)
+      var yr=u.valToPos(100/7,'y',true);
+      ctx.strokeStyle='rgba(248,113,113,.6)';
+      ctx.setLineDash([4,3]);
+      ctx.beginPath();
+      ctx.moveTo(u.bbox.left,yr);
+      ctx.lineTo(u.bbox.left+u.bbox.width,yr);
+      ctx.stroke();
+      ctx.restore();
+    }
+    var opts={
+      width:w, height:220,
+      scales:{ x:{time:true}, y:{range:[0, Math.max(20, Math.ceil(Math.max.apply(null,ys)/5)*5+5)]} },
+      series:[
+        {},
+        {label:'Δ Woche (%-Pkt)', stroke:'rgba(179,136,255,0)', points:{show:false}}
+      ],
+      axes:[
+        {stroke:'#b8bdd0', grid:{stroke:'rgba(255,255,255,.06)'}},
+        {stroke:'#b8bdd0', grid:{stroke:'rgba(255,255,255,.06)'}, values:function(u,v){return v.map(function(x){return x+'%';});}}
+      ],
+      hooks:{ draw:[drawBars] }
+    };
+    new uPlot(opts,[xs,ys],host);
+  }
+  function buildHeatmap(rows){
+    var host=document.getElementById('heatmap');
+    if(!host) return;
+    if(!rows.length){ show('empty-heatmap'); return; }
+    var cutoff=(Date.now()/1000)-30*86400;
+    var sums=new Array(7*24).fill(0);
+    var counts=new Array(7*24).fill(0);
+    rows.forEach(function(r){
+      var t=Date.parse(r.t)/1000;
+      if(isNaN(t)||t<cutoff) return;
+      var d=new Date(t*1000);
+      var dow=(d.getDay()+6)%7; // Mon=0
+      var hr=d.getHours();
+      var idx=dow*24+hr;
+      sums[idx]+=r.sess;
+      counts[idx]++;
+    });
+    var means=sums.map(function(s,i){return counts[i]?s/counts[i]:null;});
+    var days=['Mo','Di','Mi','Do','Fr','Sa','So'];
+    var html='<div class="hd"></div>';
+    for(var h=0;h<24;h++) html+='<div class="hd">'+(h%3===0?h:'')+'</div>';
+    for(var d=0;d<7;d++){
+      html+='<div class="rl">'+days[d]+'</div>';
+      for(var h2=0;h2<24;h2++){
+        var v=means[d*24+h2];
+        var bg='rgba(255,255,255,.05)';
+        if(v!=null){
+          var a=Math.max(0.08,Math.min(1,v/80));
+          // gradient low=green, high=red
+          var hue=Math.max(0, 130 - Math.round(v*1.3));
+          bg='hsla('+hue+',70%,55%,'+a.toFixed(2)+')';
+        }
+        html+='<div class="cell" style="background:'+bg+'" title="'+days[d]+' '+h2+':00 → '+(v==null?'–':Math.round(v)+'%')+'"></div>';
+      }
+    }
+    host.innerHTML=html;
+  }
+  function renderSummary(summary){
+    if(!summary) return;
+    document.getElementById('t-avg').textContent=fmtPct(summary.avg_delta_week);
+    document.getElementById('t-heavy').textContent=(summary.heavy_per_week==null?'–':summary.heavy_per_week);
+    document.getElementById('t-ratio').textContent=fmtRatio(summary.current_ratio);
+  }
+  loadAll().then(function(res){
+    var rows=parseJsonl(res[0]);
+    var payload=res[1]||{};
+    if(payload && payload.summary) renderSummary(payload.summary);
+    buildTimeseries(rows);
+    buildSessionsBar(payload.sessions||[]);
+    buildHeatmap(rows);
   });
 })();
 </script>
