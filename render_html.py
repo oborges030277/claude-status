@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
@@ -10,6 +10,29 @@ except Exception:
     _BERLIN = None
 
 _TIME_AMPM_RE = re.compile(r"(\d{1,2})(?::(\d{2}))?\s*([ap])m\b", re.IGNORECASE)
+_RESET_RE = re.compile(r"Resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap])m", re.IGNORECASE)
+
+
+def _next_reset_iso(reset_str: str) -> str:
+    # "Resets 4:30pm (Europe/Berlin)" -> next future occurrence of 16:30 in Berlin,
+    # returned as UTC ISO. Session resets are ~5h apart so this is always within today/tomorrow.
+    if not reset_str or _BERLIN is None:
+        return ""
+    m = _RESET_RE.search(reset_str)
+    if not m:
+        return ""
+    hour = int(m.group(1))
+    minute = int(m.group(2) or 0)
+    is_pm = m.group(3).lower() == "p"
+    if is_pm and hour != 12:
+        hour += 12
+    elif not is_pm and hour == 12:
+        hour = 0
+    now_berlin = datetime.now(timezone.utc).astimezone(_BERLIN)
+    cand = now_berlin.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if cand <= now_berlin:
+        cand += timedelta(days=1)
+    return cand.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 def _ampm_to_24h(match: re.Match) -> str:
@@ -44,13 +67,24 @@ def _bucket(pct: int) -> str:
 def _card(section: dict) -> str:
     title = escape(section["title"])
     percent = max(0, min(100, int(section.get("percent") or 0)))
-    reset = escape(_to_24h(section.get("reset") or ""))
+    reset_raw = section.get("reset") or ""
+    reset = escape(_to_24h(reset_raw))
     reset_html = f'<div class="reset">{reset}</div>' if reset else ""
+    countdown_html = ""
+    if section.get("title") == "Current session":
+        target = _next_reset_iso(reset_raw)
+        if target:
+            cls = "countdown" + (" countdown-crit" if percent >= 100 else "")
+            countdown_html = (
+                f'<div class="{cls}" data-target="{escape(target)}">'
+                f'<span class="cd-label">Nächster Session-Reset in</span>'
+                f'<span class="cd-value">–</span></div>'
+            )
     return (
         f'<article class="card pct-{_bucket(percent)}">'
         f'<div class="row"><h2>{title}</h2><span class="pct">{percent}%</span></div>'
         f'<div class="bar"><div class="fill" style="width:{percent}%"></div></div>'
-        f'{reset_html}</article>'
+        f'{reset_html}{countdown_html}</article>'
     )
 
 
@@ -123,6 +157,15 @@ header p{{opacity:.7;font-size:14px;margin-top:6px}}
 .card.pct-high .fill{{background:linear-gradient(90deg,#fdba74,#f97316)}}
 .card.pct-crit .fill{{background:linear-gradient(90deg,#fca5a5,#ef4444)}}
 .reset{{margin-top:14px;font-size:13px;color:#eef1f7;opacity:.95;font-weight:500}}
+.countdown{{margin-top:10px;display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12)}}
+.countdown .cd-label{{font-size:12px;opacity:.8;text-transform:uppercase;letter-spacing:.04em}}
+.countdown .cd-value{{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;color:#7aa2ff}}
+.countdown.countdown-crit{{background:linear-gradient(90deg,rgba(248,113,113,.22),rgba(248,113,113,.10));
+  border-color:rgba(248,113,113,.5)}}
+.countdown.countdown-crit .cd-value{{color:#fca5a5;font-size:22px}}
+.countdown.countdown-crit .cd-label{{color:#fecaca;opacity:1}}
 .extra{{margin-top:12px;font-size:13px;opacity:.75}}
 footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
 .charts{{margin-top:32px;display:grid;gap:16px}}
@@ -150,6 +193,15 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
 .heatmap .hd{{opacity:.55;text-align:center;line-height:16px}}
 .heatmap .rl{{opacity:.55;line-height:18px;text-align:right;padding-right:4px}}
 .heatmap .cell{{height:18px;border-radius:3px;background:rgba(255,255,255,.05)}}
+.hm-legend{{margin-top:12px;display:flex;align-items:center;gap:10px;font-size:11px;opacity:.8}}
+.hm-legend .bar{{flex:1;height:10px;border-radius:999px;
+  background:linear-gradient(90deg,
+    rgba(255,255,255,.06) 0%,
+    hsla(130,70%,55%,.45) 12%,
+    hsla(80,70%,55%,.65) 35%,
+    hsla(45,70%,55%,.85) 60%,
+    hsla(0,70%,55%,1) 100%)}}
+.hm-legend .lbl{{font-variant-numeric:tabular-nums;opacity:.75;min-width:28px;text-align:center}}
 .uplot,.u-wrap,.u-over{{background:transparent!important}}
 .u-legend{{color:#eef1f7!important;font-size:12px}}
 .u-legend .u-label,.u-legend .u-value{{color:#eef1f7!important}}
@@ -179,23 +231,33 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
       <div class="tile"><div class="val" id="t-remaining">–</div><div class="lbl">Volle Sessions noch übrig (diese Woche)</div></div>
       <div class="tile"><div class="val" id="t-current">–</div><div class="lbl">Aktuelle Session – hochgerechnet</div></div>
     </div>
-    <div style="opacity:.55;font-size:11px;margin-top:10px;line-height:1.4">
-      Hochgerechnet = Δ Woche / genutzte Session-% × 100. Damit zählen auch Sessions, die du nicht voll ausschöpfst.
+    <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
+      <b>Ø Wochenkosten / voll genutzte Session</b>: Durchschnitt über die letzten 14 Tage — wieviel Wochenkontingent eine voll ausgeschöpfte Session typischerweise kostet.<br>
+      <b>Aktuelle Session – hochgerechnet</b>: Wenn du die gerade laufende Session zu 100% durchziehst, kostet sie dich so viel Wochenkontingent.<br>
+      <span style="opacity:.7">Formel: Δ Woche / SessionPeak × 100. Damit zählen auch teilweise genutzte Sessions.</span>
     </div>
   </div>
   <div class="chart-card">
-    <h2>Verlauf – letzte 7 Tage (Session% &amp; Woche%)</h2>
-    <div id="chart-timeseries"></div>
-    <div class="empty" id="empty-timeseries" style="display:none">noch keine Daten</div>
-  </div>
-  <div class="chart-card">
-    <h2>Hochgerechnete Wochenkosten pro Session (letzte 30 Tage)</h2>
-    <div id="chart-sessions"></div>
-    <div class="empty" id="empty-sessions" style="display:none">noch keine ausgewerteten Sessions</div>
+    <h2>Wochenkontingent – Ist vs. Ideallinie (letzte 3 Wochen)</h2>
+    <div id="chart-weekly"></div>
+    <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
+    <div style="opacity:.55;font-size:11px;margin-top:10px;line-height:1.4">
+      Die Ideallinie ist das lineare Soll: bei jedem Wochen-Reset bei 0%, am Ende der Woche bei 100%. Die Ist-Linie zeigt deinen tatsächlichen Wochenkontingent-Verbrauch über die Kalendertage.
+    </div>
   </div>
   <div class="chart-card">
     <h2>Aktivität – Tag × Stunde</h2>
     <div id="heatmap" class="heatmap"></div>
+    <div class="hm-legend" id="hm-legend" style="display:none">
+      <span class="lbl">0%</span>
+      <span class="lbl" style="text-align:center;flex:0 0 auto;padding:0 4px;opacity:.55">Ø Session-% in diesem Slot</span>
+      <span class="lbl">100%</span>
+    </div>
+    <div class="hm-legend" id="hm-legend-bar" style="display:none">
+      <span class="lbl" style="visibility:hidden">0%</span>
+      <span class="bar"></span>
+      <span class="lbl" style="visibility:hidden">100%</span>
+    </div>
     <div class="empty" id="empty-heatmap" style="display:none">noch keine Daten</div>
   </div>
 </section>
@@ -252,29 +314,79 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
       fetch('{sess_file}?t='+Date.now(),{{cache:'no-store'}}).then(function(r){{return r.ok?r.json():null;}}).catch(function(){{return null;}})
     ]);
   }}
-  function buildTimeseries(rows){{
-    var host=document.getElementById('chart-timeseries');
+  function detectWeekResets(rows){{
+    // A week reset = consecutive rows where week% drops steeply into single digits.
+    // Returns timestamps (unix seconds) where a new week started (use the "after" row).
+    var out=[];
+    for(var i=1;i<rows.length;i++){{
+      var a=rows[i-1], b=rows[i];
+      if(a.week-b.week>=30 && b.week<=15){{ out.push(Date.parse(b.t)/1000); }}
+    }}
+    return out;
+  }}
+  function buildWeekly(rows){{
+    var host=document.getElementById('chart-weekly');
     if(!host) return;
-    if(!rows.length || typeof uPlot==='undefined'){{ show('empty-timeseries'); return; }}
-    var cutoff=(Date.now()/1000)-7*86400;
-    var xs=[],sess=[],week=[];
-    var lastSid=null, markers=[];
-    rows.forEach(function(r){{
-      var t=Date.parse(r.t)/1000;
-      if(isNaN(t)||t<cutoff) return;
-      xs.push(t); sess.push(r.sess); week.push(r.week);
-      if(lastSid!=null && r.sid!==lastSid){{ markers.push(t); }}
-      lastSid=r.sid;
-    }});
-    if(!xs.length){{ show('empty-timeseries'); return; }}
+    if(!rows.length || typeof uPlot==='undefined'){{ show('empty-weekly'); return; }}
+    var nowSec=Date.now()/1000;
+    var cutoff=nowSec-21*86400;
+    var inWin=rows.filter(function(r){{ var t=Date.parse(r.t)/1000; return !isNaN(t) && t>=cutoff; }});
+    if(!inWin.length){{ show('empty-weekly'); return; }}
+    // Build list of week-start timestamps inside window.
+    // Start with detected resets; if none, assume the earliest row is the start of the current week.
+    var resets=detectWeekResets(rows).filter(function(t){{return t>=cutoff;}});
+    var firstT=Date.parse(inWin[0].t)/1000;
+    var starts=resets.slice();
+    if(!starts.length || starts[0]>firstT+3600){{
+      // Prepend the window's first row as the implicit start of the earliest visible week.
+      starts.unshift(firstT);
+    }}
+    // Build ideal sawtooth: for each segment [starts[i], starts[i+1]] go from 0% to 100%.
+    // For the last (ongoing) segment, project 7 days forward.
+    var WEEK=7*86400;
+    var idealX=[], idealY=[];
+    for(var i=0;i<starts.length;i++){{
+      var s=starts[i];
+      var e=(i+1<starts.length)?starts[i+1]:(s+WEEK);
+      idealX.push(s); idealY.push(0);
+      idealX.push(e); idealY.push(100);
+      // insert gap so uPlot doesn't connect back to 0 of next segment
+      if(i+1<starts.length){{
+        idealX.push(e+1); idealY.push(null);
+      }}
+    }}
+    // Actual line: all rows in window
+    var actualX=inWin.map(function(r){{return Date.parse(r.t)/1000;}});
+    var actualY=inWin.map(function(r){{return r.week;}});
+    // Align to single x-axis: uPlot needs one shared x-array. Merge sorted unique.
+    var xset={{}};
+    idealX.forEach(function(x){{if(x!=null) xset[x]=1;}});
+    actualX.forEach(function(x){{xset[x]=1;}});
+    var xs=Object.keys(xset).map(Number).sort(function(a,b){{return a-b;}});
+    // Build ideal and actual series aligned to xs (use null where no value)
+    function interpIdeal(t){{
+      for(var i=0;i<starts.length;i++){{
+        var s=starts[i];
+        var e=(i+1<starts.length)?starts[i+1]:(s+WEEK);
+        if(t>=s && t<=e){{
+          return (t-s)/(e-s)*100;
+        }}
+      }}
+      return null;
+    }}
+    var ideal=xs.map(interpIdeal);
+    // Actual: only at real sample points; null elsewhere to keep line only where we have data
+    var actMap={{}};
+    for(var j=0;j<actualX.length;j++){{ actMap[actualX[j]]=actualY[j]; }}
+    var actual=xs.map(function(x){{return (x in actMap)?actMap[x]:null;}});
     var w=host.clientWidth||680;
     var opts={{
       width:w, height:260,
-      scales:{{ x:{{time:true}}, y:{{range:[0,100]}} }},
+      scales:{{ x:{{time:true, range:[Math.max(cutoff,xs[0]), Math.max(nowSec, xs[xs.length-1])]}}, y:{{range:[0,105]}} }},
       series:[
         {{}},
-        {{label:'Session %', stroke:'#7aa2ff', width:2, points:{{show:false}}}},
-        {{label:'Woche %',   stroke:'#c86dd7', width:2, points:{{show:false}}}}
+        {{label:'Ideallinie (linear)', stroke:'rgba(248,113,113,.7)', width:1.5, dash:[4,4], points:{{show:false}}, spanGaps:false}},
+        {{label:'Ist-Verbrauch %',     stroke:'#7aa2ff', width:2, points:{{show:false}}, spanGaps:true}}
       ],
       axes:[
         {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}}},
@@ -282,12 +394,13 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
       ],
       hooks:{{
         draw:[function(u){{
-          if(!markers.length) return;
+          if(!starts.length) return;
           var ctx=u.ctx;
           ctx.save();
-          ctx.strokeStyle='rgba(255,255,255,.25)';
-          ctx.setLineDash([3,3]);
-          markers.forEach(function(m){{
+          ctx.strokeStyle='rgba(255,255,255,.18)';
+          ctx.setLineDash([2,3]);
+          starts.forEach(function(m){{
+            if(m<u.scales.x.min||m>u.scales.x.max) return;
             var x=u.valToPos(m,'x',true);
             ctx.beginPath();
             ctx.moveTo(x,u.bbox.top);
@@ -298,60 +411,16 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
         }}]
       }}
     }};
-    new uPlot(opts,[xs,sess,week],host);
-  }}
-  function buildSessionsBar(sessions){{
-    var host=document.getElementById('chart-sessions');
-    if(!host) return;
-    var usable=(sessions||[]).filter(function(s){{return s.norm_delta_week!=null && s.delta_week>0;}});
-    if(!usable.length || typeof uPlot==='undefined'){{ show('empty-sessions'); return; }}
-    var xs=usable.map(function(s){{return Date.parse(s.start_t)/1000;}});
-    var ys=usable.map(function(s){{return s.norm_delta_week;}});
-    var colors=usable.map(function(s){{return s.complete?'rgba(179,136,255,.85)':'rgba(122,162,255,.85)';}});
-    var w=host.clientWidth||680;
-    var barWidth=Math.max(3, Math.min(14, Math.floor(w/(xs.length*2))));
-    function drawBars(u){{
-      var ctx=u.ctx;
-      ctx.save();
-      for(var i=0;i<xs.length;i++){{
-        var x=u.valToPos(xs[i],'x',true);
-        var y=u.valToPos(ys[i],'y',true);
-        var y0=u.valToPos(0,'y',true);
-        ctx.fillStyle=colors[i];
-        ctx.fillRect(x-barWidth/2,y,barWidth,Math.max(1,y0-y));
-      }}
-      // reference line at 14.3 (100/7 → gleichverteilte Woche)
-      var yr=u.valToPos(100/7,'y',true);
-      ctx.strokeStyle='rgba(248,113,113,.6)';
-      ctx.setLineDash([4,3]);
-      ctx.beginPath();
-      ctx.moveTo(u.bbox.left,yr);
-      ctx.lineTo(u.bbox.left+u.bbox.width,yr);
-      ctx.stroke();
-      ctx.restore();
-    }}
-    var maxY=Math.max.apply(null,ys);
-    var xMin=Math.min.apply(null,xs), xMax=Math.max.apply(null,xs);
-    if(xMin===xMax){{ xMin-=6*3600; xMax+=6*3600; }}
-    var opts={{
-      width:w, height:220,
-      scales:{{ x:{{time:true, range:[xMin,xMax]}}, y:{{range:[0, Math.max(20, Math.ceil(maxY/5)*5+5)]}} }},
-      series:[
-        {{}},
-        {{label:'Hochgerechnet % / voll genutzte Session', stroke:'rgba(179,136,255,0)', points:{{show:false}}}}
-      ],
-      axes:[
-        {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}}},
-        {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}, values:function(u,v){{return v.map(function(x){{return x+'%';}});}}}}
-      ],
-      hooks:{{ draw:[drawBars] }}
-    }};
-    new uPlot(opts,[xs,ys],host);
+    new uPlot(opts,[xs,ideal,actual],host);
   }}
   function buildHeatmap(rows){{
     var host=document.getElementById('heatmap');
     if(!host) return;
     if(!rows.length){{ show('empty-heatmap'); return; }}
+    var leg1=document.getElementById('hm-legend');
+    var leg2=document.getElementById('hm-legend-bar');
+    if(leg1) leg1.style.display='flex';
+    if(leg2) leg2.style.display='flex';
     var cutoff=(Date.now()/1000)-30*86400;
     var sums=new Array(7*24).fill(0);
     var counts=new Array(7*24).fill(0);
@@ -396,10 +465,33 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     var rows=parseJsonl(res[0]);
     var payload=res[1]||{{}};
     if(payload && payload.summary) renderSummary(payload.summary);
-    buildTimeseries(rows);
-    buildSessionsBar(payload.sessions||[]);
+    buildWeekly(rows);
     buildHeatmap(rows);
   }});
+}})();
+(function(){{
+  // Live countdown to session reset. Data source: data-target ISO UTC on .countdown elements.
+  function pad(n){{return n<10?('0'+n):(''+n);}}
+  function fmt(remSec){{
+    if(remSec<=0) return '00:00:00';
+    var h=Math.floor(remSec/3600);
+    var m=Math.floor((remSec%3600)/60);
+    var s=remSec%60;
+    return pad(h)+':'+pad(m)+':'+pad(s);
+  }}
+  function tick(){{
+    var nodes=document.querySelectorAll('.countdown[data-target]');
+    var now=Date.now();
+    nodes.forEach(function(node){{
+      var ts=Date.parse(node.getAttribute('data-target'));
+      if(isNaN(ts)) return;
+      var rem=Math.max(0, Math.floor((ts-now)/1000));
+      var val=node.querySelector('.cd-value');
+      if(val) val.textContent=fmt(rem);
+    }});
+  }}
+  tick();
+  setInterval(tick, 1000);
 }})();
 </script>
 </body>
