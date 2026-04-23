@@ -87,7 +87,7 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 }
 .tile .val{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:#b388ff}
 .tile .lbl{font-size:11px;opacity:.7;margin-top:6px;text-transform:uppercase;letter-spacing:.04em}
-.heatmap{display:grid;grid-template-columns:28px repeat(24,1fr);gap:2px;font-size:10px}
+.heatmap{display:grid;grid-template-columns:46px repeat(24,1fr);gap:2px;font-size:10px}
 .heatmap .hd{opacity:.55;text-align:center;line-height:16px}
 .heatmap .rl{opacity:.55;line-height:18px;text-align:right;padding-right:4px}
 .heatmap .cell{height:18px;border-radius:3px;background:rgba(255,255,255,.05)}
@@ -113,15 +113,15 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-23T20:47:44+00:00">
+<div id="age" class="age" data-updated="2026-04-23T20:50:56+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-23 22:47 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-23 22:50 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-<article class="card pct-mlow"><div class="row"><h2>Current session</h2><span class="pct">35%</span></div><div class="bar"><div class="fill" style="width:35%"></div></div><div class="reset">Resets 00:00 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-23T22:00:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
+<article class="card pct-mlow"><div class="row"><h2>Current session</h2><span class="pct">38%</span></div><div class="bar"><div class="fill" style="width:38%"></div></div><div class="reset">Resets 00:00 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-23T22:00:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
 <article class="card pct-low"><div class="row"><h2>Current week (all models)</h2><span class="pct">3%</span></div><div class="bar"><div class="fill" style="width:3%"></div></div><div class="reset">Resets Apr 28, 23:00 (Europe/Berlin)</div><div class="countdown" data-target="" data-countdown-weekly="1"><span class="cd-label">Nächster Wochen-Reset in</span><span class="cd-value">–</span></div></article>
 </section>
 <section class="charts">
@@ -293,9 +293,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     });
     if(!actualX.length && !idealX.length){ show('empty-weekly'); return; }
     // Projection line: straight line from (currentWeekStart, 0%) through the latest
-    // actual point to (rightEdge, projectedEnd%). Since the three points are collinear,
-    // we only need the two endpoints — uPlot with spanGaps:true draws the line straight.
-    var projOk=false, projStart=null, projEnd=null, projY=null;
+    // actual point, extended to the week end — but capped at 100% so the y-axis
+    // stays on a sensible scale. projOver flags the overshoot case for color.
+    var projOk=false, projStart=null, projEnd=null, projY=null, projOver=false;
     var currentStart=starts.length?starts[starts.length-1]:null;
     if(currentStart!=null){
       var latestT=null, latestY=null;
@@ -306,8 +306,17 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
       }
       if(latestT!=null && latestT>currentStart){
         var rate=latestY/(latestT-currentStart);
-        projY=rate*(rightEdge-currentStart);
-        projStart=currentStart; projEnd=rightEdge; projOk=true;
+        var rawProjY=rate*(rightEdge-currentStart);
+        projStart=currentStart;
+        if(rawProjY>100 && rate>0){
+          projOver=true;
+          projEnd=currentStart+100/rate;
+          projY=100;
+        } else {
+          projEnd=rightEdge;
+          projY=rawProjY;
+        }
+        projOk=true;
       }
     }
     // Merge to a single shared x-axis for uPlot.
@@ -336,11 +345,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
       if(x===projEnd) return projY;
       return null;
     });
-    // Expand y-axis if projection overshoots 100% so the endpoint stays visible.
     var yMax=105;
-    if(projOk && projY>100){ yMax=Math.min(250, Math.ceil((projY+5)/5)*5); }
     // Projektion: grün wenn das Wochenlimit voraussichtlich reicht, sonst gelb.
-    var projStroke=(projOk && projY>100)?'#fbbf24':'#4ade80';
+    var projStroke=(projOk && projOver)?'#fbbf24':'#4ade80';
     // 24h-Formatter: uPlot default x-axis und Legende verwenden sonst 12h mit AM/PM.
     var pad2=function(n){return n<10?'0'+n:''+n;};
     var fmt24Date=function(ts){var d=new Date(ts*1000);return pad2(d.getDate())+'.'+pad2(d.getMonth()+1)+'.';};
@@ -397,35 +404,47 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     if(!rows.length){ show('empty-heatmap'); return; }
     var leg=document.getElementById('hm-legend');
     if(leg) leg.style.display='block';
-    var cutoff=(Date.now()/1000)-30*86400;
+    // Row 6 = today (bottom). Row 0 = 6 days ago (top). Floating window.
+    var nowD=new Date();
+    var today=new Date(nowD.getFullYear(),nowD.getMonth(),nowD.getDate());
+    var todayEpoch=today.getTime()/1000;
+    var rowDates=[];
+    for(var i=0;i<7;i++){
+      var rd=new Date(today);
+      rd.setDate(rd.getDate()-(6-i));
+      rowDates.push(rd);
+    }
     var sums=new Array(7*24).fill(0);
     var counts=new Array(7*24).fill(0);
     rows.forEach(function(r){
       var t=Date.parse(r.t)/1000;
-      if(isNaN(t)||t<cutoff) return;
-      var d=new Date(t*1000);
-      var dow=(d.getDay()+6)%7; // Mon=0
-      var hr=d.getHours();
-      var idx=dow*24+hr;
+      if(isNaN(t)) return;
+      var dt=new Date(t*1000);
+      var dayMid=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()).getTime()/1000;
+      var offset=Math.round((todayEpoch-dayMid)/86400);
+      if(offset<0||offset>6) return;
+      var rowIdx=6-offset;
+      var idx=rowIdx*24+dt.getHours();
       sums[idx]+=r.sess;
       counts[idx]++;
     });
     var means=sums.map(function(s,i){return counts[i]?s/counts[i]:null;});
-    var days=['Mo','Di','Mi','Do','Fr','Sa','So'];
+    var dayNames=['So','Mo','Di','Mi','Do','Fr','Sa'];
     var html='<div class="hd"></div>';
     for(var h=0;h<24;h++) html+='<div class="hd">'+(h%3===0?h:'')+'</div>';
     for(var d=0;d<7;d++){
-      html+='<div class="rl">'+days[d]+'</div>';
+      var rd=rowDates[d];
+      var lbl=dayNames[rd.getDay()]+' '+rd.getDate()+'.';
+      html+='<div class="rl">'+lbl+'</div>';
       for(var h2=0;h2<24;h2++){
         var v=means[d*24+h2];
         var bg='rgba(255,255,255,.05)';
         if(v!=null){
           var a=Math.max(0.08,Math.min(1,v/80));
-          // gradient low=green, high=red
           var hue=Math.max(0, 130 - Math.round(v*1.3));
           bg='hsla('+hue+',70%,55%,'+a.toFixed(2)+')';
         }
-        html+='<div class="cell" style="background:'+bg+'" title="'+days[d]+' '+h2+':00 → '+(v==null?'–':Math.round(v)+'%')+'"></div>';
+        html+='<div class="cell" style="background:'+bg+'" title="'+lbl+' '+h2+':00 → '+(v==null?'–':Math.round(v)+'%')+'"></div>';
       }
     }
     host.innerHTML=html;
