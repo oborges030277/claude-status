@@ -3,9 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
 <title>Claude Usage</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -91,15 +88,15 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-23T06:20:18+00:00">
+<div id="age" class="age" data-updated="2026-04-23T06:25:41+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-23 08:20 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-23 08:25 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-<article class="card pct-high"><div class="row"><h2>Current session</h2><span class="pct">78%</span></div><div class="bar"><div class="fill" style="width:78%"></div></div><div class="reset">Resets 11:30 (Europe/Berlin)</div></article>
+<article class="card pct-high"><div class="row"><h2>Current session</h2><span class="pct">84%</span></div><div class="bar"><div class="fill" style="width:84%"></div></div><div class="reset">Resets 11:30 (Europe/Berlin)</div></article>
 <article class="card pct-high"><div class="row"><h2>Current week (all models)</h2><span class="pct">84%</span></div><div class="bar"><div class="fill" style="width:84%"></div></div><div class="reset">Resets 21:00 (Europe/Berlin)</div></article>
 </section>
 <section class="charts">
@@ -153,9 +150,7 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
       .then(function(text){
         if(!text) return;
         var m=text.match(/id="age"[^>]*data-updated="([^"]+)"/);
-        if(m && m[1]!==el.getAttribute('data-updated')){
-          var u=new URL(location.href); u.searchParams.set('cb',Date.now()); location.replace(u.toString());
-        }
+        if(m && m[1]!==el.getAttribute('data-updated')) location.reload();
       })
       .catch(function(){});
   }
@@ -262,11 +257,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
       ctx.restore();
     }
     var maxY=Math.max.apply(null,ys);
-    var xMin=Math.min.apply(null,xs), xMax=Math.max.apply(null,xs);
-    if(xMin===xMax){ xMin-=6*3600; xMax+=6*3600; }
     var opts={
       width:w, height:220,
-      scales:{ x:{time:true, range:[xMin,xMax]}, y:{range:[0, Math.max(20, Math.ceil(maxY/5)*5+5)]} },
+      scales:{ x:{time:true}, y:{range:[0, Math.max(20, Math.ceil(maxY/5)*5+5)]} },
       series:[
         {},
         {label:'Hochgerechnet % / voll genutzte Session', stroke:'rgba(179,136,255,0)', points:{show:false}}
