@@ -257,8 +257,10 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     <h2>Wochenkontingent – Ist vs. Ideallinie (letzte 3 Wochen + laufende Woche)</h2>
     <div id="chart-weekly" data-next-week-reset="{escape(next_week_reset)}"></div>
     <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
-    <div style="opacity:.55;font-size:11px;margin-top:10px;line-height:1.4">
-      Die Ideallinie ist das lineare Soll: bei jedem Wochen-Reset bei 0%, am Ende der Woche bei 100%. Die Ist-Linie zeigt deinen tatsächlichen Wochenkontingent-Verbrauch über die Kalendertage.
+    <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
+      <b>Ideallinie</b> (rot, gestrichelt): lineares Soll — 0% am Wochen-Reset, 100% am Ende der Woche.<br>
+      <b>Ist-Verbrauch</b> (blau): dein tatsächlicher Wochenkontingent-Verbrauch.<br>
+      <b>Projektion</b> (gelb, gestrichelt): Gerade vom aktuellen Wochenstart durch deinen Ist-Punkt, verlängert zum Wochenende. Wo sie die rechte Kante schneidet, endet deine Woche, wenn du in der aktuellen Durchschnittsrate weitermachst. Unter 100% = Kontingent reicht; über 100% = Kontingent wird vorher aufgebraucht.
     </div>
   </div>
   <div class="chart-card">
@@ -404,12 +406,31 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
       }}
     }});
     if(!actualX.length && !idealX.length){{ show('empty-weekly'); return; }}
+    // Projection line: straight line from (currentWeekStart, 0%) through the latest
+    // actual point to (rightEdge, projectedEnd%). Since the three points are collinear,
+    // we only need the two endpoints — uPlot with spanGaps:true draws the line straight.
+    var projOk=false, projStart=null, projEnd=null, projY=null;
+    var currentStart=starts.length?starts[starts.length-1]:null;
+    if(currentStart!=null){{
+      var latestT=null, latestY=null;
+      for(var k=actualX.length-1;k>=0;k--){{
+        if(actualX[k]>=currentStart && actualX[k]<=nowSec){{
+          latestT=actualX[k]; latestY=actualY[k]; break;
+        }}
+      }}
+      if(latestT!=null && latestT>currentStart){{
+        var rate=latestY/(latestT-currentStart);
+        projY=rate*(rightEdge-currentStart);
+        projStart=currentStart; projEnd=rightEdge; projOk=true;
+      }}
+    }}
     // Merge to a single shared x-axis for uPlot.
     var xset={{}};
     idealX.forEach(function(x){{ if(x!=null) xset[x]=1; }});
     actualX.forEach(function(x){{ xset[x]=1; }});
-    xset[Math.floor(leftEdge)]=1;
-    xset[Math.floor(rightEdge)]=1;
+    xset[leftEdge]=1;
+    xset[rightEdge]=1;
+    if(projOk){{ xset[projStart]=1; xset[projEnd]=1; }}
     var xs=Object.keys(xset).map(Number).sort(function(a,b){{return a-b;}});
     function interpIdeal(t){{
       for(var i=0;i<starts.length;i++){{
@@ -423,14 +444,24 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     var actMap={{}};
     for(var j=0;j<actualX.length;j++){{ actMap[actualX[j]]=actualY[j]; }}
     var actual=xs.map(function(x){{ return (x in actMap)?actMap[x]:null; }});
+    var projection=xs.map(function(x){{
+      if(!projOk) return null;
+      if(x===projStart) return 0;
+      if(x===projEnd) return projY;
+      return null;
+    }});
+    // Expand y-axis if projection overshoots 100% so the endpoint stays visible.
+    var yMax=105;
+    if(projOk && projY>100){{ yMax=Math.min(250, Math.ceil((projY+5)/5)*5); }}
     var w=host.clientWidth||680;
     var opts={{
       width:w, height:260,
-      scales:{{ x:{{time:true, range:[leftEdge, rightEdge]}}, y:{{range:[0,105]}} }},
+      scales:{{ x:{{time:true, range:[leftEdge, rightEdge]}}, y:{{range:[0,yMax]}} }},
       series:[
         {{}},
-        {{label:'Ideallinie (linear)', stroke:'rgba(248,113,113,.7)', width:1.5, dash:[4,4], points:{{show:false}}, spanGaps:false}},
-        {{label:'Ist-Verbrauch %',     stroke:'#7aa2ff', width:2, points:{{show:false}}, spanGaps:true}}
+        {{label:'Ideallinie (linear)',            stroke:'rgba(248,113,113,.7)', width:1.5, dash:[4,4], points:{{show:false}}, spanGaps:false}},
+        {{label:'Ist-Verbrauch %',                stroke:'#7aa2ff',              width:2,   points:{{show:false}}, spanGaps:true}},
+        {{label:'Projektion (aktuelle Rate)',     stroke:'#fbbf24',              width:1.8, dash:[6,4], points:{{show:false}}, spanGaps:true}}
       ],
       axes:[
         {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}}},
@@ -466,7 +497,7 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
         }}]
       }}
     }};
-    new uPlot(opts,[xs,ideal,actual],host);
+    new uPlot(opts,[xs,ideal,actual,projection],host);
   }}
   function buildHeatmap(rows){{
     var host=document.getElementById('heatmap');
