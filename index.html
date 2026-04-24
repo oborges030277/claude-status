@@ -112,16 +112,16 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-24T14:15:55+00:00">
+<div id="age" class="age" data-updated="2026-04-24T14:20:45+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-24 16:15 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-24 16:20 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-<article class="card pct-high"><div class="row"><h2>Current session</h2><span class="pct">70%</span></div><div class="bar"><div class="fill" style="width:70%"></div></div><div class="reset">Resets 16:20 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-24T14:20:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
-<article class="card pct-mlow"><div class="row"><h2>Current week (all models)</h2><span class="pct">15%</span></div><div class="bar"><div class="fill" style="width:15%"></div></div><div class="reset">Resets Apr 28, 23:00 (Europe/Berlin)</div><div class="countdown" data-target="" data-countdown-weekly="1"><span class="cd-label">Nächster Wochen-Reset in</span><span class="cd-value">–</span></div></article>
+<article class="card pct-low"><div class="row"><h2>Current session</h2><span class="pct">0%</span></div><div class="bar"><div class="fill" style="width:0%"></div></div><div class="reset">Resets 21:20 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-24T19:20:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
+<article class="card pct-mlow"><div class="row"><h2>Current week (all models)</h2><span class="pct">16%</span></div><div class="bar"><div class="fill" style="width:16%"></div></div><div class="reset">Resets Apr 28, 23:00 (Europe/Berlin)</div><div class="countdown" data-target="" data-countdown-weekly="1"><span class="cd-label">Nächster Wochen-Reset in</span><span class="cd-value">–</span></div></article>
 </section>
 <section class="charts">
   <div class="chart-card">
@@ -139,9 +139,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     <div id="chart-recent"></div>
     <div class="empty" id="empty-recent" style="display:none">noch keine Daten</div>
     <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
-      <b>5h-Kontingent</b> (türkis): wieviele Prozentpunkte pro Minute die Session-Auslastung aktuell steigt.<br>
-      <b>Wochenkontingent</b> (gelb): wieviele Prozentpunkte pro Minute das Wochenkontingent aktuell steigt.<br>
-      <span style="opacity:.7">Berechnung: Δ% zwischen aufeinanderfolgenden Samples / Δt in Minuten. Wird die KI nicht genutzt, fällt die Rate auf 0. Resets (sess → 0 / week → 0) werden herausgefiltert. Sample-Takt ~5 min.</span>
+      <b>5h-Kontingent</b> (türkis, <b>linke Achse</b>): Prozentpunkte pro Minute, um die die Session-Auslastung aktuell steigt.<br>
+      <b>Wochenkontingent</b> (gelb, <b>rechte Achse</b>): Prozentpunkte pro Minute, um die das Wochenkontingent aktuell steigt.<br>
+      <span style="opacity:.7">Zwei getrennte Y-Achsen, weil das Wochenkontingent ~20× größer ist als eine Session — gleicher KI-Einsatz bewegt die Wochen-Rate viel weniger. Berechnung: Δ% zwischen Samples / Δt in Minuten. Wird die KI nicht genutzt, fällt die Rate auf 0. Resets werden herausgefiltert. Sample-Takt ~5 min.</span>
     </div>
   </div>
   <div class="chart-card">
@@ -436,26 +436,32 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     if(!xs.length){ show('empty-recent'); return; }
     var pad2=function(n){return n<10?'0'+n:''+n;};
     var fmtHM=function(ts){var d=new Date(ts*1000);return pad2(d.getHours())+':'+pad2(d.getMinutes());};
+    var autoRange=function(u,min,max){
+      var top=Math.max(max||0, 0.1);
+      return [0, top*1.15];
+    };
     var w=host.clientWidth||680;
     var opts={
       width:w, height:240,
       scales:{
         x:{time:true, range:[leftEdge, nowSec]},
-        y:{range:function(u,min,max){
-          var top=Math.max(max||0, 1);
-          return [0, top*1.15];
-        }}
+        s:{range:autoRange},
+        wk:{range:autoRange}
       },
       series:[
         {value:function(u,v){return v==null?'–':fmtHM(v);}},
-        {label:'5h-Kontingent %/min',   stroke:'#5eead4', width:2, points:{show:true,size:4}, spanGaps:true,
+        {label:'5h-Kontingent %/min',    scale:'s',  stroke:'#5eead4', width:2, points:{show:true,size:4}, spanGaps:true,
           value:function(u,v){return v==null?'–':v.toFixed(2);}},
-        {label:'Wochenkontingent %/min', stroke:'#fbbf24', width:2, points:{show:true,size:4}, spanGaps:true,
-          value:function(u,v){return v==null?'–':v.toFixed(2);}}
+        {label:'Wochenkontingent %/min', scale:'wk', stroke:'#fbbf24', width:2, points:{show:true,size:4}, spanGaps:true,
+          value:function(u,v){return v==null?'–':v.toFixed(3);}}
       ],
       axes:[
-        {stroke:'#b8bdd0', grid:{stroke:'rgba(255,255,255,.06)'}, values:function(u,splits){return splits.map(fmtHM);}},
-        {stroke:'#b8bdd0', grid:{stroke:'rgba(255,255,255,.06)'}, values:function(u,v){return v.map(function(x){return x.toFixed(2)+'%/min';});}}
+        {stroke:'#b8bdd0', grid:{stroke:'rgba(255,255,255,.06)'},
+          values:function(u,splits){return splits.map(fmtHM);}},
+        {scale:'s',  side:3, stroke:'#5eead4', grid:{stroke:'rgba(255,255,255,.06)'},
+          values:function(u,v){return v.map(function(x){return x.toFixed(2);});}},
+        {scale:'wk', side:1, stroke:'#fbbf24', grid:{show:false},
+          values:function(u,v){return v.map(function(x){return x.toFixed(3);});}}
       ]
     };
     new uPlot(opts,[xs,sessRate,weekRate],host);
