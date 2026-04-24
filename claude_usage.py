@@ -280,8 +280,9 @@ def detect_sessions(rows: list[dict]) -> list[dict]:
         week_end = int(g[-1].get("week") or 0)
         delta_week = week_end - week_start
         # Normalized "what would this session cost at full utilization" — valid
-        # as soon as the user has used >=10% of the session, so partial sessions
-        # contribute too (user rarely drains a 5h block to 100%).
+        # as soon as the user has used >=10% of the session, so the current
+        # (still-growing) session gets a live extrapolation too. The tighter
+        # peak>=80 gate is applied later, only to the 14-day average.
         norm_delta_week = (delta_week / peak * 100) if peak >= 10 else None
         ratio = (delta_week / peak) if peak >= 10 else None
         out.append(
@@ -315,19 +316,23 @@ def compute_summary(sessions: list[dict]) -> dict:
     if not sessions:
         return empty
     cutoff = datetime.now(timezone.utc) - timedelta(days=14)
-    # Include the current (incomplete) session too — its ratio is already
-    # meaningful once peak_sess >= 10%. Only skip sessions with too little
-    # signal (peak < 10%) via the norm_delta_week == None filter.
+    # Weighted average: avg_norm = 100 × Σ(delta_week) / Σ(peak_sess).
+    # Each session's contribution is proportional to its peak — short noisy
+    # sessions (low peak) pull their weight down automatically, so we don't
+    # need a hard peak-threshold cutoff. Equivalent to pooling all observed
+    # (peak, delta) pairs into one ratio, with peak as the weight.
     recent = [
         s for s in sessions
-        if s.get("norm_delta_week") is not None
-        and s.get("delta_week", 0) > 0
+        if s.get("delta_week", 0) > 0
+        and s.get("peak_sess", 0) >= 10
         and datetime.fromisoformat(s["start_t"]) >= cutoff
     ]
     if recent:
-        avg_norm = sum(s["norm_delta_week"] for s in recent) / len(recent)
-        avg_raw = sum(s["delta_week"] for s in recent) / len(recent)
-        heavy_per_week = round(100 / avg_norm) if avg_norm > 0 else None
+        sum_peak = sum(s["peak_sess"] for s in recent)
+        sum_delta = sum(s["delta_week"] for s in recent)
+        avg_norm = (100 * sum_delta / sum_peak) if sum_peak > 0 else None
+        avg_raw = sum_delta / len(recent)
+        heavy_per_week = round(100 / avg_norm) if avg_norm and avg_norm > 0 else None
     else:
         avg_norm = None
         avg_raw = None
@@ -428,7 +433,7 @@ def build_and_publish(data: dict) -> None:
             cwd=ROOT, check=False, timeout=60,
         )
     except subprocess.TimeoutExpired as e:
-        print(f"[{datetime.now().isoformat(timespec='seconds')}] git timeout: {e!r}", file=sys.stderr)
+        print(f"[{datetime.now().isoformat(timespec='seconds')}] [ClaudeUsage] git timeout: {e!r}", file=sys.stderr)
 
 
 def run_once() -> None:
@@ -459,6 +464,13 @@ def sleep_interruptible(seconds: float) -> bool:
 
 
 def main() -> int:
+    # ANSI OSC 0 sets the Windows console window title — makes the taskbar entry
+    # recognisable when multiple python consoles are open.
+    try:
+        sys.stdout.write("\x1b]0;ClaudeUsage\x07")
+        sys.stdout.flush()
+    except Exception:
+        pass
     signal.signal(signal.SIGINT, _handle_sigint)
     for sig_name in ("SIGTERM", "SIGBREAK"):
         sig = getattr(signal, sig_name, None)
@@ -468,19 +480,19 @@ def main() -> int:
             except (ValueError, OSError):
                 pass
 
-    print(f"[{datetime.now().isoformat(timespec='seconds')}] claude-status started, interval={INTERVAL_SECONDS}s")
+    print(f"[{datetime.now().isoformat(timespec='seconds')}] [ClaudeUsage] started, interval={INTERVAL_SECONDS}s")
     while not _stop.is_set():
         started = time.monotonic()
         try:
             run_once()
             status = "aborted" if _stop.is_set() else "updated"
-            print(f"[{datetime.now().isoformat(timespec='seconds')}] {status} ({time.monotonic()-started:.1f}s)")
+            print(f"[{datetime.now().isoformat(timespec='seconds')}] [ClaudeUsage] {status} ({time.monotonic()-started:.1f}s)")
         except Exception as e:
-            print(f"[{datetime.now().isoformat(timespec='seconds')}] ERROR: {e!r}", file=sys.stderr)
+            print(f"[{datetime.now().isoformat(timespec='seconds')}] [ClaudeUsage] ERROR: {e!r}", file=sys.stderr)
         if _stop.is_set():
             break
         sleep_interruptible(INTERVAL_SECONDS)
-    print("stopped.")
+    print("[ClaudeUsage] stopped.")
     return 0
 
 
