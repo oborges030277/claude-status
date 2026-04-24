@@ -112,15 +112,15 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-24T14:26:08+00:00">
+<div id="age" class="age" data-updated="2026-04-24T14:28:20+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-24 16:26 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-24 16:28 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-<article class="card pct-low"><div class="row"><h2>Current session</h2><span class="pct">3%</span></div><div class="bar"><div class="fill" style="width:3%"></div></div><div class="reset">Resets 21:20 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-24T19:20:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
+<article class="card pct-low"><div class="row"><h2>Current session</h2><span class="pct">8%</span></div><div class="bar"><div class="fill" style="width:8%"></div></div><div class="reset">Resets 21:20 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-24T19:20:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
 <article class="card pct-mlow"><div class="row"><h2>Current week (all models)</h2><span class="pct">16%</span></div><div class="bar"><div class="fill" style="width:16%"></div></div><div class="reset">Resets Apr 28, 23:00 (Europe/Berlin)</div><div class="countdown" data-target="" data-countdown-weekly="1"><span class="cd-label">Nächster Wochen-Reset in</span><span class="cd-value">–</span></div></article>
 </section>
 <section class="charts">
@@ -141,7 +141,7 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
       <b>5h-Kontingent</b> (türkis, <b>linke Achse</b>): Prozentpunkte pro Minute, um die die Session-Auslastung aktuell steigt.<br>
       <b>Wochenkontingent</b> (gelb, <b>rechte Achse</b>): Prozentpunkte pro Minute, um die das Wochenkontingent aktuell steigt.<br>
-      <span style="opacity:.7">Zwei getrennte Y-Achsen, weil das Wochenkontingent ~20× größer ist als eine Session — gleicher KI-Einsatz bewegt die Wochen-Rate viel weniger. Berechnung: Δ% zwischen Samples / Δt in Minuten. Wird die KI nicht genutzt, fällt die Rate auf 0. Resets werden herausgefiltert. Sample-Takt ~5 min.</span>
+      <span style="opacity:.7">Zwei getrennte Y-Achsen, weil das Wochenkontingent ~20× größer ist als eine Session — gleicher KI-Einsatz bewegt die Wochen-Rate viel weniger. Berechnung: gleitender Durchschnitt über 20 min (Δ% / Δt_min), weil <code>/usage</code> die Prozentwerte nur als ganze Zahlen liefert und sonst die Wochenkurve zwischen Integer-Stufen auf 0 pendeln würde. Wird die KI nicht genutzt, fällt die Rate auf 0. Resets werden herausgefiltert.</span>
     </div>
   </div>
   <div class="chart-card">
@@ -408,30 +408,38 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     if(typeof uPlot==='undefined'){ show('empty-recent'); return; }
     var nowSec=Date.now()/1000;
     var leftEdge=nowSec-3600;
-    // Rate = Δ% zwischen aufeinanderfolgenden Samples / Δt_min.
-    // Wir brauchen auch den Sample *vor* leftEdge als Anker, damit das erste
-    // Rate-Sample im Fenster korrekt berechnet wird (nicht auf null fällt).
-    // Negative Δ (Reset) → 0 (kein Verbrauch, sondern Rückstellung).
-    var prev=null;
-    var xs=[], sessRate=[], weekRate=[];
+    // Rate = gleitender Durchschnitt über ein rollendes Fenster WINDOW_SEC.
+    // Für jeden Sample bei t: suche Anker in der Vergangenheit, der mindestens
+    // WINDOW_SEC alt ist (oder ältester verfügbarer Sample). Rate = Δ% / Δt_min.
+    // Begründung: /usage liefert week/sess als Integer-%. Pure Zwei-Sample-
+    // Differenzen pendeln dadurch zwischen 0 und Spikes. Ein rolling window
+    // glättet das und sorgt dafür, dass Session- und Wochen-Kurve dieselbe Form
+    // bekommen (nur unterschiedliche Magnitude). Negative Δ (Reset) → 0.
+    var WINDOW_SEC=20*60;
+    var ts=[], sessV=[], weekV=[];
     for(var i=0;i<rows.length;i++){
       var r=rows[i];
       var t=Date.parse(r.t)/1000;
-      if(isNaN(t)) continue;
-      if(t>nowSec) break;
-      if(prev!=null){
-        var dt=(t-prev.t)/60;
-        if(dt>0 && t>=leftEdge){
-          var ds=(r.sess!=null && prev.sess!=null)?(r.sess-prev.sess)/dt:null;
-          var dw=(r.week!=null && prev.week!=null)?(r.week-prev.week)/dt:null;
-          if(ds!=null && ds<0) ds=0;
-          if(dw!=null && dw<0) dw=0;
-          xs.push(t);
-          sessRate.push(ds);
-          weekRate.push(dw);
-        }
+      if(isNaN(t) || t>nowSec) continue;
+      ts.push(t); sessV.push(r.sess); weekV.push(r.week);
+    }
+    var xs=[], sessRate=[], weekRate=[];
+    for(var i=0;i<ts.length;i++){
+      var t=ts[i];
+      if(t<leftEdge) continue;
+      var anchor=null;
+      for(var j=i-1;j>=0;j--){
+        anchor=j;
+        if(t-ts[j]>=WINDOW_SEC) break;
       }
-      prev={t:t, sess:r.sess, week:r.week};
+      if(anchor==null) continue;
+      var dt=(t-ts[anchor])/60;
+      if(dt<=0) continue;
+      var ds=(sessV[i]!=null && sessV[anchor]!=null)?(sessV[i]-sessV[anchor])/dt:null;
+      var dw=(weekV[i]!=null && weekV[anchor]!=null)?(weekV[i]-weekV[anchor])/dt:null;
+      if(ds!=null && ds<0) ds=0;
+      if(dw!=null && dw<0) dw=0;
+      xs.push(t); sessRate.push(ds); weekRate.push(dw);
     }
     if(!xs.length){ show('empty-recent'); return; }
     var pad2=function(n){return n<10?'0'+n:''+n;};
