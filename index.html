@@ -112,20 +112,20 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-24T19:30:13+00:00">
+<div id="age" class="age" data-updated="2026-04-24T19:32:42+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-24 21:30 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-24 21:32 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-<article class="card pct-low"><div class="row"><h2>Current session</h2><span class="pct">8%</span></div><div class="bar"><div class="fill" style="width:8%"></div></div><div class="reset">Resets 02:20 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-25T00:20:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
+<article class="card pct-low"><div class="row"><h2>Current session</h2><span class="pct">10%</span></div><div class="bar"><div class="fill" style="width:10%"></div></div><div class="reset">Resets 02:20 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-25T00:20:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
 <article class="card pct-mlow"><div class="row"><h2>Current week (all models)</h2><span class="pct">22%</span></div><div class="bar"><div class="fill" style="width:22%"></div></div><div class="reset">Resets Apr 28, 23:00 (Europe/Berlin)</div><div class="countdown" data-target="" data-countdown-weekly="1"><span class="cd-label">Nächster Wochen-Reset in</span><span class="cd-value">–</span></div></article>
 </section>
 <section class="charts">
   <div class="chart-card">
-    <h2>Wochenkontingent – Ist vs. Ideallinie (letzte Woche + laufende Woche)</h2>
+    <h2 id="chart-weekly-title">Wochenkontingent – Ist vs. Ideallinie (letzte Woche + laufende Woche)</h2>
     <div id="chart-weekly" data-next-week-reset=""></div>
     <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
     <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
@@ -303,7 +303,7 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     // Projection line: straight line from (currentWeekStart, 0%) through the latest
     // actual point, extended to the week end — but capped at 100% so the y-axis
     // stays on a sensible scale. projOver flags the overshoot case for color.
-    var projOk=false, projStart=null, projEnd=null, projY=null, projOver=false;
+    var projOk=false, projStart=null, projEnd=null, projY=null, projOver=false, time100=null;
     var currentStart=starts.length?starts[starts.length-1]:null;
     if(currentStart!=null){
       var latestT=null, latestY=null;
@@ -316,6 +316,7 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
         var rate=latestY/(latestT-currentStart);
         var rawProjY=rate*(rightEdge-currentStart);
         projStart=currentStart;
+        if(rate>0) time100=currentStart+100/rate;
         if(rawProjY>100 && rate>0){
           projOver=true;
           projEnd=currentStart+100/rate;
@@ -327,6 +328,27 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
         projOk=true;
       }
     }
+    // Chart-Titel dynamisch ergänzen: Abweichung der Projektion vom Ende der
+    // Ideallinie in T/Std./Min. Negativ = Projektion erreicht 100% VOR dem
+    // Wochenende (Kontingent reicht nicht); positiv = 100% wird erst danach
+    // erreicht (Kontingent reicht).
+    (function(){
+      var titleEl=document.getElementById('chart-weekly-title');
+      if(!titleEl) return;
+      var base='Wochenkontingent – Ist vs. Ideallinie (letzte Woche + laufende Woche)';
+      if(!projOk || time100==null){ titleEl.textContent=base; return; }
+      var deltaSec=time100-rightEdge;
+      var sign=deltaSec<0?'−':'+';
+      var total=Math.abs(Math.round(deltaSec/60))*60;
+      var d=Math.floor(total/86400);
+      var h=Math.floor((total%86400)/3600);
+      var m=Math.floor((total%3600)/60);
+      var parts=[];
+      if(d>0) parts.push(d+'T');
+      if(h>0||d>0) parts.push(h+' Std.');
+      parts.push(m+' Min.');
+      titleEl.textContent=base+' — 100 % erreicht '+sign+parts.join(' ');
+    })();
     // Merge to a single shared x-axis for uPlot.
     var xset={};
     idealX.forEach(function(x){ if(x!=null) xset[x]=1; });
