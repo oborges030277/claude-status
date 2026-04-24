@@ -113,9 +113,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-24T04:43:47+00:00">
+<div id="age" class="age" data-updated="2026-04-24T04:46:05+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-24 06:43 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-24 06:46 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
@@ -141,7 +141,7 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     </div>
   </div>
   <div class="chart-card">
-    <h2>Wochenkontingent – Ist vs. Ideallinie (letzte 3 Wochen + laufende Woche)</h2>
+    <h2>Wochenkontingent – Ist vs. Ideallinie (letzte Woche + laufende Woche)</h2>
     <div id="chart-weekly" data-next-week-reset=""></div>
     <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
     <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
@@ -240,7 +240,6 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     if(typeof uPlot==='undefined'){ show('empty-weekly'); return; }
     var WEEK=7*86400;
     var nowSec=Date.now()/1000;
-    var leftEdge=nowSec-21*86400;
     // Determine the right edge = next weekly reset.
     // Priority 1: last detected reset from history + 7 days.
     // Priority 2: server-supplied data-next-week-reset (parsed from the /usage reset string).
@@ -255,14 +254,8 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
       if(!isNaN(t)) rightEdge=t;
     }
     if(rightEdge==null) rightEdge=nowSec+3.5*86400;
-    // Build week-start boundaries covering [leftEdge, rightEdge].
-    // Start from the ongoing week's start (rightEdge - 7d) and step back.
-    var starts=[];
-    var s=rightEdge-WEEK;
-    while(s>leftEdge-WEEK+1){
-      starts.unshift(s);
-      s-=WEEK;
-    }
+    // Show previous week + current week (2 weeks total).
+    var starts=[rightEdge-2*WEEK, rightEdge-WEEK];
     // If we have detected resets, prefer them (more accurate than pure projection):
     // replace each projected start within ±12h of a detected reset with the detected value.
     if(resets.length){
@@ -274,6 +267,7 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
         return ps;
       });
     }
+    var leftEdge=starts[0];
     // Ideal sawtooth: for each segment [starts[i], next_boundary], 0% → 100%.
     // Insert NULL breaks so uPlot doesn't connect segments.
     var idealX=[], idealY=[];
