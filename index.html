@@ -112,9 +112,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-24T09:41:43+00:00">
+<div id="age" class="age" data-updated="2026-04-24T09:43:48+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-24 11:41 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-24 11:43 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
@@ -477,9 +477,11 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
   function pad(n){return n<10?('0'+n):(''+n);}
   function fmt(remSec){
     if(remSec<=0) return '00:00:00';
-    var h=Math.floor(remSec/3600);
+    var d=Math.floor(remSec/86400);
+    var h=Math.floor((remSec%86400)/3600);
     var m=Math.floor((remSec%3600)/60);
     var s=remSec%60;
+    if(d>0) return d+'T '+pad(h)+':'+pad(m)+':'+pad(s);
     return pad(h)+':'+pad(m)+':'+pad(s);
   }
   function tick(){
