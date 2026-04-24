@@ -202,7 +202,7 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
 }}
 .tile .val{{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:#b388ff}}
 .tile .lbl{{font-size:11px;opacity:.7;margin-top:6px;text-transform:uppercase;letter-spacing:.04em}}
-.heatmap{{display:grid;grid-template-columns:28px repeat(24,1fr);gap:2px;font-size:10px}}
+.heatmap{{display:grid;grid-template-columns:46px repeat(24,1fr);gap:2px;font-size:10px}}
 .heatmap .hd{{opacity:.55;text-align:center;line-height:16px}}
 .heatmap .rl{{opacity:.55;line-height:18px;text-align:right;padding-right:4px}}
 .heatmap .cell{{height:18px;border-radius:3px;background:rgba(255,255,255,.05)}}
@@ -243,24 +243,25 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     <h2>Summary</h2>
     <div class="tiles" id="tiles">
       <div class="tile"><div class="val" id="t-norm">–</div><div class="lbl">Ø Wochenkosten / voll genutzte Session</div></div>
-      <div class="tile"><div class="val" id="t-heavy">–</div><div class="lbl">Voll genutzte Sessions / Woche</div></div>
+      <div class="tile"><div class="val" id="t-heavy">–</div><div class="lbl">Volle Sessions / Woche – Kapazität</div></div>
       <div class="tile"><div class="val" id="t-remaining">–</div><div class="lbl">Volle Sessions noch übrig (diese Woche)</div></div>
       <div class="tile"><div class="val" id="t-current">–</div><div class="lbl">Aktuelle Session – hochgerechnet</div></div>
     </div>
     <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
       <b>Ø Wochenkosten / voll genutzte Session</b>: Durchschnitt über die letzten 14 Tage — wieviel Wochenkontingent eine voll ausgeschöpfte Session typischerweise kostet.<br>
+      <b>Volle Sessions / Woche – Kapazität</b>: theoretische Obergrenze — wie viele voll genutzte Sessions rechnerisch in ein Wochenkontingent passen (100% / Ø Wochenkosten). Kein Ist-Zähler.<br>
       <b>Aktuelle Session – hochgerechnet</b>: Wenn du die gerade laufende Session zu 100% durchziehst, kostet sie dich so viel Wochenkontingent.<br>
       <span style="opacity:.7">Formel: Δ Woche / SessionPeak × 100. Damit zählen auch teilweise genutzte Sessions.</span>
     </div>
   </div>
   <div class="chart-card">
-    <h2>Wochenkontingent – Ist vs. Ideallinie (letzte 3 Wochen + laufende Woche)</h2>
+    <h2>Wochenkontingent – Ist vs. Ideallinie (letzte Woche + laufende Woche)</h2>
     <div id="chart-weekly" data-next-week-reset="{escape(next_week_reset)}"></div>
     <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
     <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
       <b>Ideallinie</b> (rot, gestrichelt): lineares Soll — 0% am Wochen-Reset, 100% am Ende der Woche.<br>
       <b>Ist-Verbrauch</b> (blau): dein tatsächlicher Wochenkontingent-Verbrauch.<br>
-      <b>Projektion</b> (gelb, gestrichelt): Gerade vom aktuellen Wochenstart durch deinen Ist-Punkt, verlängert zum Wochenende. Wo sie die rechte Kante schneidet, endet deine Woche, wenn du in der aktuellen Durchschnittsrate weitermachst. Unter 100% = Kontingent reicht; über 100% = Kontingent wird vorher aufgebraucht.
+      <b>Projektion</b> (gestrichelt, grün wenn Kontingent reicht / gelb wenn nicht): Gerade vom aktuellen Wochenstart durch deinen Ist-Punkt, verlängert zum Wochenende. Wo sie die rechte Kante schneidet, endet deine Woche, wenn du in der aktuellen Durchschnittsrate weitermachst. Unter 100% = Kontingent reicht; über 100% = Kontingent wird vorher aufgebraucht.
     </div>
   </div>
   <div class="chart-card">
@@ -353,7 +354,6 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     if(typeof uPlot==='undefined'){{ show('empty-weekly'); return; }}
     var WEEK=7*86400;
     var nowSec=Date.now()/1000;
-    var leftEdge=nowSec-21*86400;
     // Determine the right edge = next weekly reset.
     // Priority 1: last detected reset from history + 7 days.
     // Priority 2: server-supplied data-next-week-reset (parsed from the /usage reset string).
@@ -368,14 +368,8 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
       if(!isNaN(t)) rightEdge=t;
     }}
     if(rightEdge==null) rightEdge=nowSec+3.5*86400;
-    // Build week-start boundaries covering [leftEdge, rightEdge].
-    // Start from the ongoing week's start (rightEdge - 7d) and step back.
-    var starts=[];
-    var s=rightEdge-WEEK;
-    while(s>leftEdge-WEEK+1){{
-      starts.unshift(s);
-      s-=WEEK;
-    }}
+    // Show previous week + current week (2 weeks total).
+    var starts=[rightEdge-2*WEEK, rightEdge-WEEK];
     // If we have detected resets, prefer them (more accurate than pure projection):
     // replace each projected start within ±12h of a detected reset with the detected value.
     if(resets.length){{
@@ -387,6 +381,7 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
         return ps;
       }});
     }}
+    var leftEdge=starts[0];
     // Ideal sawtooth: for each segment [starts[i], next_boundary], 0% → 100%.
     // Insert NULL breaks so uPlot doesn't connect segments.
     var idealX=[], idealY=[];
@@ -407,9 +402,9 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     }});
     if(!actualX.length && !idealX.length){{ show('empty-weekly'); return; }}
     // Projection line: straight line from (currentWeekStart, 0%) through the latest
-    // actual point to (rightEdge, projectedEnd%). Since the three points are collinear,
-    // we only need the two endpoints — uPlot with spanGaps:true draws the line straight.
-    var projOk=false, projStart=null, projEnd=null, projY=null;
+    // actual point, extended to the week end — but capped at 100% so the y-axis
+    // stays on a sensible scale. projOver flags the overshoot case for color.
+    var projOk=false, projStart=null, projEnd=null, projY=null, projOver=false;
     var currentStart=starts.length?starts[starts.length-1]:null;
     if(currentStart!=null){{
       var latestT=null, latestY=null;
@@ -420,8 +415,17 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
       }}
       if(latestT!=null && latestT>currentStart){{
         var rate=latestY/(latestT-currentStart);
-        projY=rate*(rightEdge-currentStart);
-        projStart=currentStart; projEnd=rightEdge; projOk=true;
+        var rawProjY=rate*(rightEdge-currentStart);
+        projStart=currentStart;
+        if(rawProjY>100 && rate>0){{
+          projOver=true;
+          projEnd=currentStart+100/rate;
+          projY=100;
+        }} else {{
+          projEnd=rightEdge;
+          projY=rawProjY;
+        }}
+        projOk=true;
       }}
     }}
     // Merge to a single shared x-axis for uPlot.
@@ -450,21 +454,25 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
       if(x===projEnd) return projY;
       return null;
     }});
-    // Expand y-axis if projection overshoots 100% so the endpoint stays visible.
     var yMax=105;
-    if(projOk && projY>100){{ yMax=Math.min(250, Math.ceil((projY+5)/5)*5); }}
+    // Projektion: grün wenn das Wochenlimit voraussichtlich reicht, sonst gelb.
+    var projStroke=(projOk && projOver)?'#fbbf24':'#4ade80';
+    // 24h-Formatter: uPlot default x-axis und Legende verwenden sonst 12h mit AM/PM.
+    var pad2=function(n){{return n<10?'0'+n:''+n;}};
+    var fmt24Date=function(ts){{var d=new Date(ts*1000);return pad2(d.getDate())+'.'+pad2(d.getMonth()+1)+'.';}};
+    var fmt24DateTime=function(ts){{var d=new Date(ts*1000);return pad2(d.getDate())+'.'+pad2(d.getMonth()+1)+'. '+pad2(d.getHours())+':'+pad2(d.getMinutes());}};
     var w=host.clientWidth||680;
     var opts={{
       width:w, height:260,
       scales:{{ x:{{time:true, range:[leftEdge, rightEdge]}}, y:{{range:[0,yMax]}} }},
       series:[
-        {{}},
+        {{value:function(u,v){{return v==null?'–':fmt24DateTime(v);}}}},
         {{label:'Ideallinie (linear)',            stroke:'rgba(248,113,113,.7)', width:1.5, dash:[4,4], points:{{show:false}}, spanGaps:false}},
         {{label:'Ist-Verbrauch %',                stroke:'#7aa2ff',              width:2,   points:{{show:false}}, spanGaps:true}},
-        {{label:'Projektion (aktuelle Rate)',     stroke:'#fbbf24',              width:1.8, dash:[6,4], points:{{show:false}}, spanGaps:true}}
+        {{label:'Projektion (aktuelle Rate)',     stroke:projStroke,             width:1.8, dash:[6,4], points:{{show:false}}, spanGaps:true}}
       ],
       axes:[
-        {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}}},
+        {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}, values:function(u,splits){{return splits.map(fmt24Date);}}}},
         {{stroke:'#b8bdd0', grid:{{stroke:'rgba(255,255,255,.06)'}}, values:function(u,v){{return v.map(function(x){{return x+'%';}});}}}}
       ],
       hooks:{{
@@ -505,35 +513,47 @@ footer{{margin-top:28px;text-align:center;font-size:12px;opacity:.5}}
     if(!rows.length){{ show('empty-heatmap'); return; }}
     var leg=document.getElementById('hm-legend');
     if(leg) leg.style.display='block';
-    var cutoff=(Date.now()/1000)-30*86400;
+    // Row 6 = today (bottom). Row 0 = 6 days ago (top). Floating window.
+    var nowD=new Date();
+    var today=new Date(nowD.getFullYear(),nowD.getMonth(),nowD.getDate());
+    var todayEpoch=today.getTime()/1000;
+    var rowDates=[];
+    for(var i=0;i<7;i++){{
+      var rd=new Date(today);
+      rd.setDate(rd.getDate()-(6-i));
+      rowDates.push(rd);
+    }}
     var sums=new Array(7*24).fill(0);
     var counts=new Array(7*24).fill(0);
     rows.forEach(function(r){{
       var t=Date.parse(r.t)/1000;
-      if(isNaN(t)||t<cutoff) return;
-      var d=new Date(t*1000);
-      var dow=(d.getDay()+6)%7; // Mon=0
-      var hr=d.getHours();
-      var idx=dow*24+hr;
+      if(isNaN(t)) return;
+      var dt=new Date(t*1000);
+      var dayMid=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()).getTime()/1000;
+      var offset=Math.round((todayEpoch-dayMid)/86400);
+      if(offset<0||offset>6) return;
+      var rowIdx=6-offset;
+      var idx=rowIdx*24+dt.getHours();
       sums[idx]+=r.sess;
       counts[idx]++;
     }});
     var means=sums.map(function(s,i){{return counts[i]?s/counts[i]:null;}});
-    var days=['Mo','Di','Mi','Do','Fr','Sa','So'];
+    var dayNames=['So','Mo','Di','Mi','Do','Fr','Sa'];
     var html='<div class="hd"></div>';
     for(var h=0;h<24;h++) html+='<div class="hd">'+(h%3===0?h:'')+'</div>';
     for(var d=0;d<7;d++){{
-      html+='<div class="rl">'+days[d]+'</div>';
+      var rd=rowDates[d];
+      var lbl=dayNames[rd.getDay()]+' '+rd.getDate()+'.';
+      html+='<div class="rl">'+lbl+'</div>';
       for(var h2=0;h2<24;h2++){{
         var v=means[d*24+h2];
         var bg='rgba(255,255,255,.05)';
         if(v!=null){{
           var a=Math.max(0.08,Math.min(1,v/80));
-          // gradient low=green, high=red
           var hue=Math.max(0, 130 - Math.round(v*1.3));
           bg='hsla('+hue+',70%,55%,'+a.toFixed(2)+')';
         }}
-        html+='<div class="cell" style="background:'+bg+'" title="'+days[d]+' '+h2+':00 → '+(v==null?'–':Math.round(v)+'%')+'"></div>';
+        html+='<div class="cell" style="background:'+bg+'" title="'+lbl+' '+h2+':00 → '+(v==null?'–':Math.round(v)+'%')+'"></div>';
       }}
     }}
     host.innerHTML=html;
