@@ -112,9 +112,9 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-25T00:48:29+00:00">
+<div id="age" class="age" data-updated="2026-04-25T00:51:19+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-25 02:48 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-25 02:51 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
@@ -233,15 +233,14 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     // Week% is monotonically non-decreasing within a week and drops to ~0 at reset.
     // So: any drop where the new value is in single digits signals a reset.
     // Require the next sample (if any) to also be low, to guard against transient
-    // parse glitches that briefly read 0%.
-    // Exclude simultaneous sess-to-~0 drops — those are account/session resets
-    // (e.g. re-login), not weekly quota resets.
+    // parse glitches (or re-login blips) that briefly read 0% and then jump back.
+    // A simultaneous sess drop is fine — a weekly reset can coincide with a new
+    // 5h session starting.
     var out=[];
     for(var i=1;i<rows.length;i++){
       var a=rows[i-1], b=rows[i];
       if(a.week==null||b.week==null) continue;
       if(a.week>b.week && b.week<=10){
-        if(a.sess!=null && b.sess!=null && a.sess>b.sess && b.sess<=10) continue;
         var next=rows[i+1];
         if(!next || next.week==null || next.week<=b.week+10){
           out.push(Date.parse(b.t)/1000);
@@ -256,7 +255,7 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     if(typeof uPlot==='undefined'){ show('empty-weekly'); return; }
     var WEEK=7*86400;
     var nowSec=Date.now()/1000;
-    // Determine the right edge = next weekly reset.
+    // Right edge = next weekly reset.
     // Priority 1: server-supplied data-next-week-reset — authoritative now that
     //   /usage reports an absolute date ("Resets Apr 28, 11pm"). The real week
     //   isn't always 7 days (rolling quota), so history+7d is not reliable.
@@ -272,19 +271,20 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
       rightEdge=resets[resets.length-1]+WEEK;
     }
     if(rightEdge==null) rightEdge=nowSec+3.5*86400;
-    // Show previous week + current week (2 weeks total).
-    var starts=[rightEdge-2*WEEK, rightEdge-WEEK];
-    // If we have detected resets, prefer them (more accurate than pure projection):
-    // replace each projected start within ±12h of a detected reset with the detected value.
-    if(resets.length){
-      var tol=12*3600;
-      starts=starts.map(function(ps){
-        for(var i=0;i<resets.length;i++){
-          if(Math.abs(resets[i]-ps)<=tol) return resets[i];
-        }
-        return ps;
-      });
+    // Segment starts. The current week starts at the most recent detected reset
+    // (that's when Claude's week% visibly dropped to 0) — NOT at rightEdge-7d,
+    // because the rolling weekly quota isn't always exactly 7 days. The previous
+    // week starts at the next-older detected reset, or falls back to current-7d
+    // when history doesn't reach that far back.
+    var currentStart=null, prevStart=null;
+    for(var ri=resets.length-1; ri>=0; ri--){
+      if(resets[ri]>rightEdge) continue;
+      if(currentStart==null){ currentStart=resets[ri]; continue; }
+      prevStart=resets[ri]; break;
     }
+    if(currentStart==null) currentStart=rightEdge-WEEK;
+    if(prevStart==null) prevStart=currentStart-WEEK;
+    var starts=[prevStart, currentStart];
     var leftEdge=starts[0];
     // Ideal sawtooth: for each segment [starts[i], next_boundary], 0% → 100%.
     // Insert NULL breaks so uPlot doesn't connect segments.
@@ -438,9 +438,14 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     if(!host) return;
     if(typeof uPlot==='undefined'){ show('empty-recent'); return; }
     var nowSec=Date.now()/1000;
-    var leftEdge=nowSec-3600;
+    // Fenster = letzte 5 Stunden (entspricht einer vollen Session). Kürzer wäre
+    // wenig aussagekräftig, wenn der Daemon samplelücken hatte.
+    var leftEdge=nowSec-5*3600;
     // Momentanverbrauch: Rate zwischen aufeinanderfolgenden Samples, keine Glättung.
-    // ds = (sess[i] - sess[i-1]) / Δt_min. Negative Δ (Session-Reset) → 0.
+    // ds = (sess[i] - sess[i-1]) / Δt_min. Bei Session-Reset (sess fällt) ist die
+    // Rate über den Reset-Übergang undefiniert — wir schreiben null und lassen
+    // spanGaps die Linie über die Lücke hinweg verbinden, damit der Chart
+    // kontinuierlich wirkt und der Reset keine künstliche 0-Delle erzeugt.
     var xs=[], sessRate=[];
     var prev=null;
     for(var i=0;i<rows.length;i++){
@@ -450,9 +455,13 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
       if(prev!=null && r.sess!=null && prev.sess!=null){
         var dt=(t-prev.t)/60;
         if(dt>0 && t>=leftEdge){
-          var ds=(r.sess-prev.sess)/dt;
-          if(ds<0) ds=0;
-          xs.push(t); sessRate.push(ds);
+          var rate;
+          if(r.sess<prev.sess){
+            rate=null;
+          } else {
+            rate=(r.sess-prev.sess)/dt;
+          }
+          xs.push(t); sessRate.push(rate);
         }
       }
       prev={t:t, sess:r.sess};
