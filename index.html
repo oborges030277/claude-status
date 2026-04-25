@@ -112,21 +112,21 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-25T00:02:40+00:00">
+<div id="age" class="age" data-updated="2026-04-25T00:05:26+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-25 02:02 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-25 02:05 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
 <section class="grid">
-<article class="card pct-crit"><div class="row"><h2>Current session</h2><span class="pct">97%</span></div><div class="bar"><div class="fill" style="width:97%"></div></div><div class="reset">Resets 02:20 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-25T00:20:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
-<article class="card pct-mlow"><div class="row"><h2>Current week (all models)</h2><span class="pct">29%</span></div><div class="bar"><div class="fill" style="width:29%"></div></div><div class="reset">Resets Apr 28, 23:00 (Europe/Berlin)</div><div class="countdown" data-target="" data-countdown-weekly="1"><span class="cd-label">Nächster Wochen-Reset in</span><span class="cd-value">–</span></div></article>
+<article class="card pct-crit"><div class="row"><h2>Current session</h2><span class="pct">100%</span></div><div class="bar"><div class="fill" style="width:100%"></div></div><div class="reset">Resets 02:20 (Europe/Berlin)</div><div class="countdown countdown-crit" data-target="2026-04-25T00:20:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
+<article class="card pct-mlow"><div class="row"><h2>Current week (all models)</h2><span class="pct">29%</span></div><div class="bar"><div class="fill" style="width:29%"></div></div><div class="reset">Resets Apr 28, 23:00 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-28T21:00:00+00:00" data-countdown-weekly="1"><span class="cd-label">Nächster Wochen-Reset in</span><span class="cd-value">–</span></div></article>
 </section>
 <section class="charts">
   <div class="chart-card">
     <h2 id="chart-weekly-title">Wochenkontingent – Ist vs. Ideallinie (letzte Woche + laufende Woche)</h2>
-    <div id="chart-weekly" data-next-week-reset=""></div>
+    <div id="chart-weekly" data-next-week-reset="2026-04-28T21:00:00+00:00"></div>
     <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
     <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
       <b>Ideallinie</b> (rot, gestrichelt): lineares Soll — 0% am Wochen-Reset, 100% am Ende der Woche.<br>
@@ -234,11 +234,14 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     // So: any drop where the new value is in single digits signals a reset.
     // Require the next sample (if any) to also be low, to guard against transient
     // parse glitches that briefly read 0%.
+    // Exclude simultaneous sess-to-~0 drops — those are account/session resets
+    // (e.g. re-login), not weekly quota resets.
     var out=[];
     for(var i=1;i<rows.length;i++){
       var a=rows[i-1], b=rows[i];
       if(a.week==null||b.week==null) continue;
       if(a.week>b.week && b.week<=10){
+        if(a.sess!=null && b.sess!=null && a.sess>b.sess && b.sess<=10) continue;
         var next=rows[i+1];
         if(!next || next.week==null || next.week<=b.week+10){
           out.push(Date.parse(b.t)/1000);
@@ -254,17 +257,19 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     var WEEK=7*86400;
     var nowSec=Date.now()/1000;
     // Determine the right edge = next weekly reset.
-    // Priority 1: last detected reset from history + 7 days.
-    // Priority 2: server-supplied data-next-week-reset (parsed from the /usage reset string).
+    // Priority 1: server-supplied data-next-week-reset — authoritative now that
+    //   /usage reports an absolute date ("Resets Apr 28, 11pm"). The real week
+    //   isn't always 7 days (rolling quota), so history+7d is not reliable.
+    // Priority 2: last detected reset from history + 7 days (legacy fallback).
     // Priority 3: fallback — nowSec + 3.5d (centered guess).
     var resets=detectWeekResets(rows);
     var rightEdge=null;
-    if(resets.length){
+    var attr=host.getAttribute('data-next-week-reset')||'';
+    var attrT=attr?Date.parse(attr)/1000:NaN;
+    if(!isNaN(attrT)){
+      rightEdge=attrT;
+    } else if(resets.length){
       rightEdge=resets[resets.length-1]+WEEK;
-    } else {
-      var attr=host.getAttribute('data-next-week-reset')||'';
-      var t=attr?Date.parse(attr)/1000:NaN;
-      if(!isNaN(t)) rightEdge=t;
     }
     if(rightEdge==null) rightEdge=nowSec+3.5*86400;
     // Show previous week + current week (2 weeks total).
@@ -558,11 +563,13 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
     document.getElementById('t-current').textContent=fmtPct(summary.current_norm_week);
   }
   function setWeeklyCountdownTarget(rows){
-    // Python pre-fills data-target with the next occurrence of the reset time-of-day.
-    // If history reveals actual week-reset moments, we override with (last_reset + 7 d)
-    // which is more accurate when the next reset is more than 24 h away.
+    // Python now parses the absolute date from /usage ("Resets Apr 28, 11pm"),
+    // so data-target is authoritative when present. Only fall back to history
+    // +7 d if Python couldn't parse a target.
     var node=document.querySelector('.countdown[data-countdown-weekly="1"]');
     if(!node) return;
+    var cur=node.getAttribute('data-target')||'';
+    if(cur && !isNaN(Date.parse(cur))) return;
     var WEEK=7*86400;
     var resets=detectWeekResets(rows);
     if(resets.length){
