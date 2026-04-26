@@ -18,11 +18,14 @@ body{
     radial-gradient(900px 600px at 50% 50%,#0f1a1e 0%,#050a0c 80%);
   background-attachment:fixed;
 }
-.wrap{max-width:720px;margin:0 auto}
+.wrap{max-width:1200px;margin:0 auto}
 header{margin-bottom:32px;text-align:center}
 header h1{font-size:28px;font-weight:600;letter-spacing:-.01em}
 header p{opacity:.7;font-size:14px;margin-top:6px}
 .grid{display:grid;gap:16px}
+.top{display:grid;grid-template-columns:minmax(300px,1fr) minmax(0,1.6fr);gap:16px;align-items:start}
+@media (max-width:960px){.top{grid-template-columns:1fr}}
+.top .chart-card{margin:0}
 .card{
   padding:22px 24px;border-radius:18px;
   background:rgba(255,255,255,.07);
@@ -112,28 +115,30 @@ footer{margin-top:28px;text-align:center;font-size:12px;opacity:.5}
 </head>
 <body>
 <div class="wrap">
-<div id="age" class="age" data-updated="2026-04-26T08:13:38+00:00">
+<div id="age" class="age" data-updated="2026-04-26T08:16:00+00:00">
   <span id="age-text">Datenalter wird berechnet…</span>
-  <small>Letzte Aktualisierung: 2026-04-26 10:13 CEST</small>
+  <small>Letzte Aktualisierung: 2026-04-26 10:16 CEST</small>
 </div>
 <header>
   <h1>Claude Usage</h1>
 </header>
+<section class="top">
 <section class="grid">
-<article class="card pct-mlow"><div class="row"><h2>Current session</h2><span class="pct">27%</span></div><div class="bar"><div class="fill" style="width:27%"></div></div><div class="reset">Resets 13:10 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-26T11:10:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
+<article class="card pct-mlow"><div class="row"><h2>Current session</h2><span class="pct">30%</span></div><div class="bar"><div class="fill" style="width:30%"></div></div><div class="reset">Resets 13:10 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-26T11:10:00+00:00"><span class="cd-label">Nächster Session-Reset in</span><span class="cd-value">–</span></div></article>
 <article class="card pct-med"><div class="row"><h2>Current week (all models)</h2><span class="pct">51%</span></div><div class="bar"><div class="fill" style="width:51%"></div></div><div class="reset">Resets Apr 28, 23:00 (Europe/Berlin)</div><div class="countdown" data-target="2026-04-28T21:00:00+00:00" data-countdown-weekly="1"><span class="cd-label">Nächster Wochen-Reset in</span><span class="cd-value">–</span></div></article>
 </section>
-<section class="charts">
-  <div class="chart-card">
-    <h2 id="chart-weekly-title">Wochenkontingent – Ist vs. Ideallinie (letzte Woche + laufende Woche)</h2>
-    <div id="chart-weekly" data-next-week-reset="2026-04-28T21:00:00+00:00"></div>
-    <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
-    <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
-      <b>Ideallinie</b> (rot, gestrichelt): lineares Soll — 0% am Wochen-Reset, 100% am Ende der Woche.<br>
-      <b>Ist-Verbrauch</b> (türkis): dein tatsächlicher Wochenkontingent-Verbrauch.<br>
-      <b>Projektion</b> (gestrichelt, grün wenn Kontingent reicht / gelb wenn nicht): Gerade vom aktuellen Wochenstart durch deinen Ist-Punkt, verlängert zum Wochenende. Wo sie die rechte Kante schneidet, endet deine Woche, wenn du in der aktuellen Durchschnittsrate weitermachst. Unter 100% = Kontingent reicht; über 100% = Kontingent wird vorher aufgebraucht.
-    </div>
+<div class="chart-card">
+  <h2 id="chart-weekly-title">Wochenkontingent – Ist vs. Ideallinie (letzte Woche + laufende Woche)</h2>
+  <div id="chart-weekly" data-next-week-reset="2026-04-28T21:00:00+00:00"></div>
+  <div class="empty" id="empty-weekly" style="display:none">noch keine Daten</div>
+  <div style="opacity:.6;font-size:11px;margin-top:10px;line-height:1.5">
+    <b>Ideallinie</b> (rot, gestrichelt): lineares Soll — 0% am Wochen-Reset, 100% am Ende der Woche.<br>
+    <b>Ist-Verbrauch</b> (türkis): dein tatsächlicher Wochenkontingent-Verbrauch.<br>
+    <b>Projektion</b> (gestrichelt, grün wenn Kontingent reicht / gelb wenn nicht): Gerade vom aktuellen Wochenstart durch deinen Ist-Punkt, verlängert zum Wochenende. Wo sie die rechte Kante schneidet, endet deine Woche, wenn du in der aktuellen Durchschnittsrate weitermachst. Unter 100% = Kontingent reicht; über 100% = Kontingent wird vorher aufgebraucht.
   </div>
+</div>
+</section>
+<section class="charts">
   <div class="chart-card">
     <h2>Live-Verbrauch 5h-Kontingent (% pro Minute)</h2>
     <div id="chart-recent"></div>
